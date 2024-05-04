@@ -1,0 +1,90 @@
+openapi: 3.0.0
+info:
+  title: Voyager file Spec
+  version: 1.0.0
+
+components:
+  schemas:
+    Workspace:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/WorkspaceResourceSpec'
+    WorkspaceResourceSpec:
+      type: object
+      properties:
+        storageSize:
+          type: string
+          pattern: '^(\d+(?:\.\d+)?)(Gi|Mi|Ki)?$'
+          example: '2Gi'
+          description: This defines the size of the backing perisitant storage that needs to be provisioned for this resource.
+        imageRegistry:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        args:
+          type: array
+          items:
+            type: string
+        mounts:
+          type: object
+          additionalProperties:
+            type: string
+        environmentVariables:
+          type: object
+          additionalProperties:
+            type: string
+        dependsOn:
+          type: array
+          items:
+            type: string
+        ports:
+          type: array
+          items:
+            $ref: '#/components/schemas/Port'
+        source:
+          $ref: '#/components/schemas/ApplicationSourceSpec'
+        image:
+          $ref: '#/components/schemas/PrebuiltApplicationSpec'
+    Port:
+      type: object
+      properties:
+        number:
+          type: integer
+          format: int32
+        exposeToPublic:
+          type: boolean
+          default: false
+        isHttp:
+          type: boolean
+          default: true
+      required:
+      - number
+
+    ResourceMounts:
+      type: object
+      properties:
+        source:
+          type: string
+        destination:
+          type: string
+      required:
+      - source
+      - destination
+
+    ApplicationSourceSpec:
+      type: object
+      properties:
+        sourceDir:
+          type: string
+        buildContext:
+          type: string
+        dockerFilePath:
+          type: string
+    PrebuiltApplicationSpec:
+      type: object
+      properties:
+        image:
+          type: string
+          format: docker-image

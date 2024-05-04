@@ -1,0 +1,88 @@
+package tools
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"text/template"
+)
+
+type SSHConfig struct {
+	Port             int
+	User             string
+	IdentityFilePath string
+}
+
+const sshConfigTemplate = `
+Host localhost
+	StrictHostKeyChecking no
+    HostName localhost
+    Port {{.Port}}
+    User {{.User}}
+    IdentityFile {{.IdentityFilePath}}
+`
+
+func writeVoyagerSSHConfig(voyagerConfigPath string, config *SSHConfig) (string, error) {
+	sshDirPath := filepath.Join(voyagerConfigPath, "ssh")
+	if err := os.MkdirAll(sshDirPath, 0700); err != nil {
+		return "", fmt.Errorf("failed to create SSH directory: %v", err)
+	}
+
+	voyagerSshConfigPath := filepath.Join(sshDirPath, "config")
+	file, err := os.OpenFile(voyagerSshConfigPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed to open SSH config file: %v", err)
+	}
+	defer file.Close()
+
+	tmpl, err := template.New("ssh_config").Parse(sshConfigTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse SSH config template: %v", err)
+	}
+	err = tmpl.Execute(file, config)
+	if err != nil {
+		return "", fmt.Errorf("failed to write SSH config: %v", err)
+	}
+	println(voyagerSshConfigPath)
+	return voyagerSshConfigPath, nil
+}
+
+func EnsureVoyagerSshConfig(sshConfigPath, voyagerConfigPath string, config *SSHConfig) error {
+	voyagerSshConfigPath, err := writeVoyagerSSHConfig(voyagerConfigPath, config)
+	if err != nil {
+		return err
+	}
+	desiredString := fmt.Sprintf("Include %s", voyagerSshConfigPath)
+	content, err := os.ReadFile(sshConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			err = os.WriteFile(sshConfigPath, []byte(desiredString+"\n\n"), 0644)
+			if err != nil {
+				return fmt.Errorf("failed to create ssh config file: %v", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to read ssh config file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+
+	// Check if the first line matches the desired string
+	if len(lines) > 0 && lines[0] == desiredString {
+		return nil
+	}
+
+	// If the desired string doesn't exist at the top, add it
+	lines = append([]string{desiredString}, lines...)
+
+	// Join the lines back into a single string
+	newConfigContent := strings.Join(lines, "\n")
+
+	// Write the updated content back to the file
+	err = os.WriteFile(sshConfigPath, []byte(newConfigContent), 0644)
+	if err != nil {
+		return fmt.Errorf("failed to update ssh config file: %v", err)
+	}
+	return nil
+}

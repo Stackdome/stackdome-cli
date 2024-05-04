@@ -1,0 +1,23 @@
+front-end:
+  imageRegistry: docker.io/myregistry
+  source:
+    sourceDir: ./app 
+    buildContext: ./app
+    dockerFilePath: Dockerfile
+  storageSize: 10Gi
+  ports:
+    - number: 8080
+      exposeToPublic: true
+      isHttp: true
+  
+  depends_on:
+  - back-end
+back-end:
+  imageRegistry: docker.io/anotherregistry
+  image: myapp:latest
+  storageSize: 20Gi
+  ports:
+    - number: 5000
+      exposeToPublic: false
+      isHttp: false
+
