@@ -12,36 +12,30 @@ func WorkspaceCRName(userName string) string {
 	return fmt.Sprintf("%s-workspace", userName)
 }
 
-const DefaultSize = "3Gi"
+const DefaultSize = "2Gi"
 
 func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, namespace string) workspacev1alpha1.WorkspaceStorage {
-
 	resourceStorageSpecList := make([]workspacev1alpha1.ResourceStorageSpec, 0)
-
-	for resourceName, spec := range in {
+	for volumeName, spec := range in.Volumes {
 		currSpec := workspacev1alpha1.ResourceStorageSpec{
-			Name: resourceName,
-			// TODO, find dir hash.
-			Hash: "init",
+			VolumeName: volumeName,
 		}
-		if spec.Image != nil {
-			currSpec.Type = workspacev1alpha1.PreBuiltApplicationStateStorage
-			if spec.StorageSize != nil {
-				currSpec.Size = *spec.StorageSize
-			} else {
-				currSpec.Size = DefaultSize
-			}
-			currSpec.DontAllowSync = true
-			currSpec.NeedsSync = false
+		if spec.Size != nil {
+			currSpec.Size = *spec.Size
 		} else {
-			currSpec.Type = workspacev1alpha1.ApplicationSourceStorage
-			if spec.StorageSize != nil {
-				currSpec.Size = *spec.StorageSize
+			currSpec.Size = DefaultSize
+		}
+		if spec.Source != nil {
+			currSpec.Type = workspacev1alpha1.SyncingStorageType
+			if spec.Source.LocalDir.Synced {
+				currSpec.NeedsSync = false
 			} else {
-				currSpec.Size = DefaultSize
+				currSpec.NeedsSync = true
 			}
-			currSpec.NeedsSync = true
-			currSpec.DontAllowSync = false
+		} else {
+			currSpec.Type = workspacev1alpha1.EmptyStorageType
+			currSpec.NeedsSync = false
+			currSpec.DontAllowSync = true
 		}
 		resourceStorageSpecList = append(resourceStorageSpecList, currSpec)
 	}
@@ -60,11 +54,9 @@ func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, nam
 
 func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username string, namespace string) *workspacev1alpha1.Workspace {
 	resourceSpecList := make([]workspacev1alpha1.ResourceSpec, 0)
-	for resourceName, userSpec := range in {
+	for resourceName, userSpec := range in.Resources {
 		currResourceSpec := workspacev1alpha1.ResourceSpec{
-			Name:         resourceName,
-			StorageSize:  *userSpec.StorageSize,
-			SyncRequired: userSpec.NeedsSync,
+			Name: resourceName,
 			Spec: workspacev1alpha1.WorkspaceResourceSpec{
 				ImageRegistry: userSpec.ImageRegistry,
 				Command:       userSpec.Command,
@@ -77,15 +69,18 @@ func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username string, name
 				Image: *userSpec.Image,
 			}
 		} else {
-			currResourceSpec.Spec.ApplicationSourceSpec = &workspacev1alpha1.ApplicationSourceSpec{
-				Context:         userSpec.Source.BuildContext,
-				DockerFile:      userSpec.Source.DockerFilePath,
-				BuildSourceHash: userSpec.Source.DirHash,
+			currResourceSpec.Spec.ApplicationBuildSpec = &workspacev1alpha1.ApplicationBuildSpec{
+				Context:         userSpec.Build.BuildContext,
+				BuildSourceHash: userSpec.Build.DirHash,
+				VolumeName:      userSpec.Build.SourceVolume,
+			}
+			if userSpec.Build.DockerFilePath != nil {
+				currResourceSpec.Spec.ApplicationBuildSpec.DockerFile = *userSpec.Build.DockerFilePath
 			}
 		}
 		currResourceSpec.Spec.EnvironmentVariables = mapEnvs(userSpec.EnvironmentVariables)
 		currResourceSpec.Spec.Ports = mapPorts(userSpec.Ports)
-		currResourceSpec.Spec.Mounts = mapMounts(userSpec.Mounts)
+		currResourceSpec.Spec.VolumeMounts = mapMounts(userSpec.VolumeMounts)
 		resourceSpecList = append(resourceSpecList, currResourceSpec)
 	}
 
@@ -114,10 +109,10 @@ func mapEnvs(in map[string]string) []workspacev1alpha1.EnvironmentVariables {
 	return res
 }
 
-func mapMounts(in map[string]string) []workspacev1alpha1.ResourceMounts {
-	res := make([]workspacev1alpha1.ResourceMounts, 0)
+func mapMounts(in map[string]string) []workspacev1alpha1.VolumeMount {
+	res := make([]workspacev1alpha1.VolumeMount, 0)
 	for src, dst := range in {
-		res = append(res, workspacev1alpha1.ResourceMounts{
+		res = append(res, workspacev1alpha1.VolumeMount{
 			Source:      src,
 			Destination: dst,
 		})

@@ -8,20 +8,40 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type Workspace map[string]*WorkspaceResourceSpec
+type Workspace struct {
+	Resources map[string]*WorkspaceResourceSpec `yaml:",inline"`
+	Volumes   map[string]*VolumeSpec            `yaml:"volumes"`
+}
 
+type VolumeSpec struct {
+	Size   *string       `yaml:"size"`
+	Source *VolumeSource `yaml:"source"`
+}
+
+type LocalDir struct {
+	Path string `yaml:"path"`
+	Sync bool   `yaml:"sync"`
+	// Internal
+	Synced bool
+}
+
+type VolumeSource struct {
+	LocalDir *LocalDir `yaml:"localDir"`
+	// Git?
+	// URL?
+	// S3?
+}
 type WorkspaceResourceSpec struct {
-	StorageSize          *string                `yaml:"storageSize"`
-	ImageRegistry        *string                `yaml:"imageRegistry"`
-	Command              []string               `yaml:"command"`
-	Args                 []string               `yaml:"args"`
-	Mounts               map[string]string      `yaml:"mounts"`
-	EnvironmentVariables map[string]string      `yaml:"environmentVariables"`
-	EnvFiles             []string               `yaml:"envFiles"`
-	DependsOn            []string               `yaml:"dependsOn"`
-	Ports                []Port                 `yaml:"ports"`
-	Source               *ApplicationSourceSpec `yaml:"source" validate:"required_without=Image"`
-	Image                *string                `yaml:"image" validate:"required_without=Source"`
+	ImageRegistry        *string               `yaml:"imageRegistry"`
+	Command              []string              `yaml:"command"`
+	Args                 []string              `yaml:"args"`
+	VolumeMounts         map[string]string     `yaml:"volumeMounts"`
+	EnvironmentVariables map[string]string     `yaml:"environmentVariables"`
+	EnvFiles             []string              `yaml:"envFiles"`
+	DependsOn            []string              `yaml:"dependsOn"`
+	Ports                []Port                `yaml:"ports"`
+	Build                *ApplicationBuildSpec `yaml:"build" validate:"required_without=Image"`
+	Image                *string               `yaml:"image" validate:"required_without=Build"`
 	// Internal
 	NeedsSync bool
 }
@@ -37,10 +57,13 @@ type ResourceMounts struct {
 	Destination string `yaml:"destination" validate:"required"`
 }
 
-type ApplicationSourceSpec struct {
-	SourceDir      string `yaml:"sourceDir" validate:"required"`
-	BuildContext   string `yaml:"buildContext" validate:"required"`
-	DockerFilePath string `yaml:"dockerFilePath" validate:"required"`
+type ApplicationBuildSpec struct {
+	// Volume name where the applications source code is present
+	SourceVolume string `yaml:"sourceVolume" validate:"required"`
+	// Build context within the source volume.
+	BuildContext string `yaml:"buildContext" validate:"required"`
+	// Path within the volume where the dockerfile can be found.
+	DockerFilePath *string `yaml:"dockerFilePath" validate:"required"`
 	// Internal
 	DirHash string
 }
@@ -49,7 +72,7 @@ type PrebuiltApplicationSpec struct {
 	Image string `yaml:"image" validate:"required"`
 }
 
-func Unmarshal(voyagerFilePath string) (Workspace, error) {
+func Unmarshal(voyagerFilePath string) (*Workspace, error) {
 	yamlFile, err := os.Open(voyagerFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("error opening YAML file: %v\n", err)
@@ -58,37 +81,37 @@ func Unmarshal(voyagerFilePath string) (Workspace, error) {
 
 	// Parse the YAML file
 	var workspace Workspace
-	err = yaml.NewDecoder(yamlFile).Decode(&workspace)
+	decoder := yaml.NewDecoder(yamlFile)
+	decoder.SetStrict(true)
+	err = decoder.Decode(&workspace)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing YAML file: %v\n", err)
 	}
-	return workspace, nil
+	return &workspace, nil
 }
 
-func (a *ApplicationSourceSpec) LocalPath() string {
-	return a.SourceDir
-}
-
-func (r *WorkspaceResourceSpec) SetAsReady() {
-	r.NeedsSync = false
+func (r *VolumeSpec) MarkAsSynced() {
+	if r.Source != nil && r.Source.LocalDir != nil {
+		r.Source.LocalDir.Synced = true
+	}
 }
 
 func (w *Workspace) SetDirHashForAllResources() {
-	for _, resource := range *w {
-		if resource.Source != nil {
-			resource.Source.DirHash = tools.ComputeDirHash(resource.Source.SourceDir)
+	for _, resource := range w.Resources {
+		if resource.Build != nil {
+			resource.Build.DirHash = tools.ComputeDirHash(resource.Build.SourceVolume)
 		}
 	}
 }
 
 func (r *WorkspaceResourceSpec) SetDirHash() {
-	if r.Source != nil {
-		r.Source.DirHash = tools.ComputeDirHash(r.Source.SourceDir)
+	if r.Build != nil {
+		r.Build.DirHash = tools.ComputeDirHash(r.Build.SourceVolume)
 	}
 }
 
 func (w *Workspace) SetAsReady() {
-	for _, resource := range *w {
+	for _, resource := range w.Resources {
 		resource.NeedsSync = false
 	}
 }

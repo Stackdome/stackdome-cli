@@ -1,7 +1,4 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
-package cmd
+package deploy
 
 import (
 	"context"
@@ -10,6 +7,7 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 
+	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
@@ -21,36 +19,36 @@ var deployArgs struct {
 }
 
 // deployCmd represents the deploy command
-var deployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "Deploy the resources specified in the voyagerfile",
-	Long:  `Deploy the resources specified in the voyagerfile`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := deploy(context.Background()); err != nil {
-			fmt.Printf("deploy cmd errored: %s\n", err.Error())
-		}
-	},
-	Args: cobra.NoArgs,
-}
 
-func init() {
-	rootCmd.AddCommand(deployCmd)
+func NewDeployCommand() *cobra.Command {
+	var deployCmd = &cobra.Command{
+		Use:   "deploy",
+		Short: "Deploy the resources specified in the voyagerfile",
+		Long:  `Deploy the resources specified in the voyagerfile`,
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := deploy(context.Background()); err != nil {
+				fmt.Printf("deploy cmd errored: %s\n", err.Error())
+			}
+		},
+		Args: cobra.NoArgs,
+	}
 	deployCmd.Flags().StringVar(&deployArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	return deployCmd
 }
 
 func deploy(ctx context.Context) error {
 	var voyagerFilePath string
-	if len(initArgs.voyagerFilePath) == 0 {
+	if len(deployArgs.voyagerFilePath) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		voyagerFilePath, err = findVoyagerFile(cwd)
+		voyagerFilePath, err = common.FindVoyagerFile(cwd)
 		if err != nil {
 			return err
 		}
 	} else {
-		voyagerFilePath = initArgs.voyagerFilePath
+		voyagerFilePath = deployArgs.voyagerFilePath
 	}
 	if len(voyagerFilePath) == 0 {
 		return fmt.Errorf("voyager file missing")
@@ -82,8 +80,8 @@ func deploy(ctx context.Context) error {
 	}
 	userWorkspace.SetAsReady()
 	userWorkspace.SetDirHashForAllResources()
-	PrintHashAndSyncStatus(userWorkspace)
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, userWorkspace)
+	PrintHashAndSyncStatus(*userWorkspace)
+	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
@@ -92,9 +90,9 @@ func deploy(ctx context.Context) error {
 }
 
 func PrintHashAndSyncStatus(in userworkspace.Workspace) {
-	for key, value := range in {
-		if value.Source != nil {
-			fmt.Printf("workspace resource:%s, Sourcehash: %s, NeedsSync: %v\n", key, value.Source.DirHash, value.NeedsSync)
+	for key, value := range in.Resources {
+		if value.Build != nil {
+			fmt.Printf("workspace resource:%s, Sourcehash: %s, NeedsSync: %v\n", key, value.Build.DirHash, value.NeedsSync)
 		} else {
 			fmt.Printf("workspace resource:%s, NeedsSync: %v\n", key, value.NeedsSync)
 		}

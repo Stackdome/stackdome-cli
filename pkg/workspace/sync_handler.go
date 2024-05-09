@@ -43,13 +43,16 @@ func (w *WorkspaceHandler) StartSyncSession(ctx context.Context) error {
 	}
 	fmt.Printf("user: %+v, resources to sync: %+v \n", w.userdefinedWorkspace, resourcesToBeSynced)
 	syncList := make(sync.SourceDestintionList, 0)
-	for _, resourceSpec := range resourcesToBeSynced {
-		current := sync.SourceDestintionPair{
-			Source:      w.userdefinedWorkspace[resourceSpec.Name].Source.SourceDir,
-			Destination: existingWS.ResourceStorageInfo(resourceSpec.Name).Subpath,
+	for volumeName, volumeSpec := range w.userdefinedWorkspace.Volumes {
+		if volumeSpec.Source != nil && volumeSpec.Source.LocalDir != nil {
+			current := sync.SourceDestintionPair{
+				Source:      volumeSpec.Source.LocalDir.Path,
+				Destination: existingWS.VolumeInfo(volumeName).Subpath,
+			}
+			syncList = append(syncList, current)
 		}
-		syncList = append(syncList, current)
 	}
+	fmt.Printf("synclist : %+v \n", syncList)
 
 	// Blocking.
 	if err := w.syncHandler.SetupSyncSession(

@@ -1,15 +1,11 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
-package cmd
+package init
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
+	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
@@ -22,27 +18,27 @@ var initArgs struct {
 }
 
 // initCmd represents the init command
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize your voyager workspace environment",
-	Long:  `Initialize your voyager workspace environment`,
-	RunE:  run,
-	Args:  cobra.NoArgs,
-}
 
-func init() {
-	rootCmd.AddCommand(initCmd)
+func NewInitCommand() *cobra.Command {
+	var initCmd = &cobra.Command{
+		Use:   "init",
+		Short: "Initialize your voyager workspace environment",
+		Long:  `Initialize your voyager workspace environment`,
+		RunE:  run,
+		Args:  cobra.NoArgs,
+	}
 	initCmd.Flags().StringVar(&initArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	return initCmd
 }
 
-func run(cmd *cobra.Command, _ []string) error {
+func run(_ *cobra.Command, _ []string) error {
 	var voyagerFilePath string
 	if len(initArgs.voyagerFilePath) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		voyagerFilePath, err = findVoyagerFile(cwd)
+		voyagerFilePath, err = common.FindVoyagerFile(cwd)
 		if err != nil {
 			return err
 		}
@@ -73,7 +69,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err := userWorkspace.Process(); err != nil {
 		return err
 	}
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, userWorkspace)
+	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
@@ -105,28 +101,3 @@ func initializeProvider(ctx context.Context) (session.Session, error) {
 	}
 	return session.NewSessionWithProvider(cfg)
 }
-
-func findVoyagerFile(dir string) (string, error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return "", err
-	}
-
-	for _, file := range files {
-		if !file.IsDir() {
-			currfileName := strings.ToLower(file.Name())
-			if currfileName == "voyagerfile.yaml" || currfileName == "voyagerfile.yml" {
-				return filepath.Join(dir, file.Name()), nil
-			}
-		}
-	}
-	return "", nil
-}
-
-// - Validate voyager file
-// - Login - using token, this returns kubeconfig file, creates NS, SA, public, privateKeys for ssh.
-// - Using initialized kubeclient we construct and create the workspace resource.
-//   With syncRequired = true
-// - Read the workspace resource and get the storage status.
-// - Setup kubectl port-forward on storage pod.
-// - Run mutagen on the workspace resources which has 'source' defined.

@@ -50,13 +50,13 @@ func (w *WorkspaceHandler) Init(ctx context.Context) error {
 		return err
 	}
 	syncProcess := &exec.Cmd{
-		Path: executablePath,
-		Args: []string{"voyager", "sync"},
-		// Stdout: os.Stdout,
-		// Stderr: os.Stderr,
+		Path:   executablePath,
+		Args:   []string{"voyager", "sync"},
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
 	}
 	// Wait for the forked process to complete.
-	if err := syncProcess.Start(); err != nil {
+	if err := syncProcess.Run(); err != nil {
 		return fmt.Errorf("error when starting voyager init subcommand: %w", err)
 	}
 	return nil

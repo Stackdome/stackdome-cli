@@ -1,7 +1,4 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
-package cmd
+package sync
 
 import (
 	"context"
@@ -10,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
@@ -21,33 +19,26 @@ var syncArgs struct {
 	voyagerFilePath string
 }
 
-// syncCmd represents the sync command
-var syncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	RunE: sync,
-	Args: cobra.NoArgs,
-}
-
-func init() {
-	rootCmd.AddCommand(syncCmd)
+func NewSyncCommand() *cobra.Command {
+	var syncCmd = &cobra.Command{
+		Use:   "sync",
+		Short: "sync local directories mentioned in the voyagerfile against remote volumes",
+		Long:  `sync local directories mentioned in the voyagerfile against remote volumes`,
+		RunE:  sync,
+		Args:  cobra.NoArgs,
+	}
 	syncCmd.Flags().StringVar(&syncArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	return syncCmd
 }
 
-func sync(cmd *cobra.Command, args []string) error {
+func sync(_ *cobra.Command, args []string) error {
 	var voyagerFilePath string
 	if len(syncArgs.voyagerFilePath) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		voyagerFilePath, err = findVoyagerFile(cwd)
+		voyagerFilePath, err = common.FindVoyagerFile(cwd)
 		if err != nil {
 			return err
 		}
@@ -82,7 +73,7 @@ func sync(cmd *cobra.Command, args []string) error {
 	if err := userWorkspace.Process(); err != nil {
 		return err
 	}
-	syncHandler, err := workspace.NewWorkspaceStorageHandler(currSession, userWorkspace)
+	syncHandler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}

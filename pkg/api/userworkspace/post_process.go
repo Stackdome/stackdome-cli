@@ -7,7 +7,7 @@ import (
 )
 
 func (w Workspace) Process() error {
-	for _, spec := range w {
+	for _, spec := range w.Resources {
 		for _, envFile := range spec.EnvFiles {
 			file, err := os.Open(envFile)
 			if err != nil {

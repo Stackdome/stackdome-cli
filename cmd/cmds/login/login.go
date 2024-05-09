@@ -1,7 +1,4 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
-package cmd
+package login
 
 import (
 	"context"
@@ -19,24 +16,19 @@ var args struct {
 }
 
 // loginCmd represents the login command
-var loginCmd = &cobra.Command{
-	Use:   "login",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Args: cobra.NoArgs,
-	RunE: login,
-}
-
-func init() {
-	rootCmd.AddCommand(loginCmd)
+func NewLoginCommand() *cobra.Command {
+	var loginCmd = &cobra.Command{
+		Use:   "login",
+		Short: "Login to a voyager server",
+		Long:  `Login to a voyager server, pass the voyager server url and voyager token as args`,
+		Args:  cobra.NoArgs,
+		RunE:  login,
+	}
 	loginCmd.Flags().StringVar(&args.token, "token", "", "Access token obtained from voyager website")
 	loginCmd.Flags().StringVar(&args.voyagerServerUrl, "url", "", "Voyager server url")
 	loginCmd.Flags().BoolVar(&args.insecure, "insecure", false, "Voyager server insecure")
+	return loginCmd
 }
 
 func login(cmd *cobra.Command, _ []string) error {

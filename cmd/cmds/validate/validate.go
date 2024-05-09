@@ -1,7 +1,4 @@
-/*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
-*/
-package cmd
+package validate
 
 import (
 	"fmt"
@@ -19,8 +16,15 @@ var validateCmd = &cobra.Command{
 	RunE:  validateRun,
 }
 
-func init() {
-	rootCmd.AddCommand(validateCmd)
+func NewValidateCommand() *cobra.Command {
+	var validateCmd = &cobra.Command{
+		Use:   "validate",
+		Short: "Validate voyager file",
+		Long:  `Validate voyager file.`,
+		Args:  cobra.ExactArgs(1),
+		RunE:  validateRun,
+	}
+	return validateCmd
 }
 
 func validateRun(cmd *cobra.Command, args []string) error {
