@@ -29,7 +29,7 @@ func NewBuildCommand() *cobra.Command {
 		},
 		Args: cobra.ExactArgs(1),
 	}
-	buildCmd.Flags().StringVar(&buildArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	buildCmd.Flags().StringVar(&buildArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return buildCmd
 }
 

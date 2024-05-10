@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/mapper"
+	"github.com/ashishmax31/voyager-cli/pkg/process"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -49,9 +51,15 @@ func (w *WorkspaceHandler) Init(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	cmdArgs := []string{"voyager", "sync-session", "start"}
+	voyagerFileFlagValue := process.GetCurrentProcessFlag(common.VoyagerFilePathFlag)
+	if voyagerFileFlagValue != nil {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--%s=%s", common.VoyagerFilePathFlag, *voyagerFileFlagValue))
+	}
 	syncProcess := &exec.Cmd{
 		Path:   executablePath,
-		Args:   []string{"voyager", "sync-session", "start"},
+		Args:   cmdArgs,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}

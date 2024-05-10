@@ -29,7 +29,7 @@ func NewSyncCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	syncCmd.Flags().StringVar(&syncArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	syncCmd.Flags().StringVar(&syncArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return syncCmd
 }
 

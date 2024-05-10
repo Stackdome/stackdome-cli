@@ -31,7 +31,7 @@ func newSyncSessionStartCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	syncCmd.Flags().StringVar(&syncSessionStartArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	syncCmd.Flags().StringVar(&syncSessionStartArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return syncCmd
 }
 

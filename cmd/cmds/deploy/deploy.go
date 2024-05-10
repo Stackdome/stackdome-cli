@@ -30,7 +30,7 @@ func NewDeployCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	deployCmd.Flags().StringVar(&deployArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	deployCmd.Flags().StringVar(&deployArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return deployCmd
 }
 

@@ -30,7 +30,7 @@ func NewInitCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	initCmd.Flags().StringVar(&initArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
+	initCmd.Flags().StringVar(&initArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return initCmd
 }
 

@@ -9,6 +9,10 @@ import (
 	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 )
 
+const (
+	VoyagerFilePathFlag = "voyagerfile-path"
+)
+
 func findVoyagerFile(dir string) (string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
