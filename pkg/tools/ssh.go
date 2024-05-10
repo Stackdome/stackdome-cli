@@ -15,7 +15,7 @@ type SSHConfig struct {
 }
 
 const sshConfigTemplate = `
-Host localhost
+	Host localhost
 	StrictHostKeyChecking no
     HostName localhost
     Port {{.Port}}

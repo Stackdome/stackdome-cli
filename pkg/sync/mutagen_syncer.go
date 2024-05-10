@@ -18,6 +18,7 @@ import (
 
 const (
 	LOCAL_PORT_FOR_SSH_TUNNEL = 17892
+	MUTAGEN_VERSION           = "v0.17.6"
 )
 
 type SourceDestintionPair struct {
@@ -92,6 +93,10 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 	defer lock.Close()
 	logrus.Debug("in mutagen SetupSyncSession")
 
+	if err := m.ensureMutagenBinary(); err != nil {
+		return err
+	}
+
 	if err := m.cleanupMutagenDaemons(); err != nil {
 		return fmt.Errorf("failed to cleanup mutagen sync sessions: %w", err)
 	}
@@ -102,6 +107,7 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 	if err != nil {
 		return err
 	}
+
 	if err := m.ensureSSHConfig(); err != nil {
 		return err
 	}
@@ -187,6 +193,17 @@ func (m *mutagenSync) stopMutagenDaemon() error {
 func (m *mutagenSync) mutagenBinaryPath() string {
 	return filepath.Join(m.mutgenBinaryDir, "mutagen")
 }
+
+func (m *mutagenSync) ensureMutagenBinary() error {
+	if _, err := os.Stat(m.mutagenBinaryPath()); err != nil {
+		if os.IsNotExist(err) {
+			return tools.DownloadMutagenBinary(m.mutgenBinaryDir, MUTAGEN_VERSION)
+		}
+		return err
+	}
+	return nil
+}
+
 func (m *mutagenSync) ensureSSHConfig() error {
 	sshConfigPath, err := ensureSSHConfigFileExists()
 	if err != nil {
