@@ -51,7 +51,7 @@ func (w *WorkspaceHandler) Init(ctx context.Context) error {
 	}
 	syncProcess := &exec.Cmd{
 		Path:   executablePath,
-		Args:   []string{"voyager", "sync"},
+		Args:   []string{"voyager", "sync-session", "start"},
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}

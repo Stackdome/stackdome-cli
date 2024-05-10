@@ -1,4 +1,4 @@
-package sync
+package syncsession
 
 import (
 	"context"
@@ -12,29 +12,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var syncArgs struct {
-	voyagerFilePath string
-}
-
-func NewSyncCommand() *cobra.Command {
+func newSyncSessionStopCommand() *cobra.Command {
 	var syncCmd = &cobra.Command{
-		Use:   "sync",
-		Short: "sync local directories mentioned in the voyagerfile against remote volumes",
-		Long:  `sync local directories mentioned in the voyagerfile against remote volumes`,
+		Use:   "stop",
+		Short: "stop a sync sync session",
+		Long:  `Stop a sync sync session`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := sync(); err != nil {
-				fmt.Printf("failed to sync local directories against remote volumes: %s", err.Error())
+			if err := stopSyncSession(); err != nil {
+				fmt.Printf("failed to stop sync session: %s", err.Error())
 				os.Exit(1)
 			}
 		},
 		Args: cobra.NoArgs,
 	}
-	syncCmd.Flags().StringVar(&syncArgs.voyagerFilePath, "voyagerfile-path", "", "--voyagerfile-path=voyagerfile.yaml")
 	return syncCmd
 }
 
-func sync() error {
-	userWorkspace, err := common.UserWorkspace(syncArgs.voyagerFilePath)
+func stopSyncSession() error {
+	userWorkspace, err := common.UserWorkspace(syncSessionArgs.voyagerFilePath)
 	if err != nil {
 		return err
 	}
@@ -57,9 +52,5 @@ func sync() error {
 		return err
 	}
 
-	if err := syncHandler.Sync(context.Background()); err != nil {
-		return err
-	}
-	fmt.Printf("Successfully synced volumes..")
-	return nil
+	return syncHandler.StopSyncSession(context.Background())
 }

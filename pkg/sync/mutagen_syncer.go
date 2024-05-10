@@ -69,6 +69,16 @@ func (m *mutagenSync) Sync(context.Context) error {
 	return nil
 }
 
+func (m *mutagenSync) StopSyncSession(context.Context) error {
+	if err := os.Remove(m.lockPath); err != nil {
+		if pathError, ok := err.(*os.PathError); ok && os.IsNotExist(pathError.Err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintionList, target provider.Target) error {
 	lock := flock.New(m.lockPath)
 	locked, err := lock.TryLock()

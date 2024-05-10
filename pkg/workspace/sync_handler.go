@@ -67,6 +67,10 @@ func (w *WorkspaceHandler) StartSyncSession(ctx context.Context) error {
 	return nil
 }
 
+func (w *WorkspaceHandler) StopSyncSession(ctx context.Context) error {
+	return w.syncHandler.StopSyncSession(ctx)
+}
+
 func (w *WorkspaceHandler) Sync(ctx context.Context) error {
 	initialized, err := w.syncHandler.Initialized(ctx)
 	if err != nil {
