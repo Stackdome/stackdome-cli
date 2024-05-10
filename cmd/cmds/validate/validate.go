@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/spf13/cobra"
@@ -19,10 +20,15 @@ var validateCmd = &cobra.Command{
 func NewValidateCommand() *cobra.Command {
 	var validateCmd = &cobra.Command{
 		Use:   "validate",
-		Short: "Validate voyager file",
-		Long:  `Validate voyager file.`,
+		Short: "Validate voyagerfile",
+		Long:  `Validate voyagerfile.`,
 		Args:  cobra.ExactArgs(1),
-		RunE:  validateRun,
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := validateRun(cmd, args); err != nil {
+				fmt.Println(err.Error())
+				os.Exit(1)
+			}
+		},
 	}
 	return validateCmd
 }

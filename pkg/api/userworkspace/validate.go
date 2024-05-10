@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator"
+	"github.com/sirupsen/logrus"
 )
 
 func Validate(voyagerFilePath string) error {
@@ -14,9 +15,9 @@ func Validate(voyagerFilePath string) error {
 	if err != nil {
 		return fmt.Errorf("error parsing YAML file: %v\n", err)
 	}
-	fmt.Printf("workspace: %+v \n", workspace)
+	logrus.Debugf("workspace: %+v \n", workspace)
 	for name, resource := range workspace.Resources {
-		fmt.Printf("name: %s, resource: %+v \n", name, *resource)
+		logrus.Debugf("name: %s, resource: %+v \n", name, *resource)
 	}
 	validate := validator.New()
 	definedVolumeNames := []string{}

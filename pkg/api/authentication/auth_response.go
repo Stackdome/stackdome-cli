@@ -4,7 +4,6 @@ import "time"
 
 type AuthResponse struct {
 	Username       string    `json:"username"`
-	Team           string    `json:"team"`
-	Namespace      string    `json:"namespace"`
+	Organisation   string    `json:"organisation"`
 	TokenValidTill time.Time `json:"tokenValidTill"`
 }

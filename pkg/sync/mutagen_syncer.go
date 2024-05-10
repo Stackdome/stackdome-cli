@@ -9,18 +9,16 @@ import (
 	"path/filepath"
 
 	"github.com/ashishmax31/voyager-cli/pkg/config"
+	"github.com/ashishmax31/voyager-cli/pkg/provider"
 	"github.com/ashishmax31/voyager-cli/pkg/tools"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gofrs/flock"
+	"github.com/sirupsen/logrus"
 )
 
 const (
 	LOCAL_PORT_FOR_SSH_TUNNEL = 17892
 )
-
-type DestinationSSHTunnelHandler interface {
-	SetupSSHTunnel(ctx context.Context) error
-}
 
 type SourceDestintionPair struct {
 	Source      string
@@ -34,13 +32,15 @@ type mutagenSync struct {
 	lockPath        string
 	lockDir         string
 	mutgenBinaryDir string
+	sshHandler      provider.StorageSSHhandler
 }
 
-func NewMutagenSyncer(cfg *config.Config, lockDir string, mutgenBinaryDir string) Syncer {
+func NewMutagenSyncer(cfg *config.Config, lockDir string, mutgenBinaryDir string, dstSSHhandler provider.StorageSSHhandler) Syncer {
 	w := &mutagenSync{
 		cfg:             cfg,
 		lockDir:         lockDir,
 		mutgenBinaryDir: mutgenBinaryDir,
+		sshHandler:      dstSSHhandler,
 	}
 
 	w.lockPath = filepath.Join(lockDir, "voyager-daemon.lock")
@@ -58,7 +58,7 @@ func (m *mutagenSync) Initialized(context.Context) (bool, error) {
 }
 
 func (m *mutagenSync) Sync(context.Context) error {
-	println("in mutagen sync")
+	logrus.Debug("in mutagen sync")
 	syncProcess := exec.Command(m.mutagenBinaryPath(), "sync", "flush", "--all")
 	syncProcess.Stdout = os.Stdout
 	syncProcess.Stderr = os.Stderr
@@ -69,21 +69,27 @@ func (m *mutagenSync) Sync(context.Context) error {
 	return nil
 }
 
-func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintionList, dstSSHhandler DestinationSSHTunnelHandler) error {
+func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintionList, target provider.Target) error {
 	lock := flock.New(m.lockPath)
 	locked, err := lock.TryLock()
 	if err != nil {
 		return fmt.Errorf("failed to acquire file lock: %w", err)
 	}
 	if !locked {
-		println("not locked! Some other instance already running")
+		logrus.Debug("not locked! Some other instance already running")
 		return nil
 	}
-	println("in mutagen SetupSyncSession")
 	defer lock.Close()
+	logrus.Debug("in mutagen SetupSyncSession")
+
+	if err := m.cleanupMutagenDaemons(); err != nil {
+		return fmt.Errorf("failed to cleanup mutagen sync sessions: %w", err)
+	}
+
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
-	if err := dstSSHhandler.SetupSSHTunnel(ctx); err != nil {
+	sshTunnelExitChan, err := m.sshHandler.SetupSSHTunnel(ctx, LOCAL_PORT_FOR_SSH_TUNNEL, target)
+	if err != nil {
 		return err
 	}
 	if err := m.ensureSSHConfig(); err != nil {
@@ -108,12 +114,16 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 	// We wait for either the context to be cancelled or the lockfile to be deleted
 	// to stop all the daemons and exit.
 	defer watcher.Stop()
-	println("watching for lock file to be deleted")
+	logrus.Info("watching for lock file to be deleted")
 	select {
 	case <-watcher.NotifyChan():
-		fmt.Println("lock file deleted, stopping all daemons")
+		logrus.Info("lock file deleted, stopping all daemons")
 		return nil
 	case <-ctx.Done():
+		logrus.Info("context canceled, stopping all daemons")
+		return nil
+	case <-sshTunnelExitChan:
+		logrus.Info("ssh tunnel exited, stopping all daemons")
 		return nil
 	}
 }
@@ -129,7 +139,7 @@ func (m *mutagenSync) cleanupMutagenDaemons() error {
 }
 
 func (m *mutagenSync) createMutgenSync(ctx context.Context, srcPath string, dstPath string) error {
-	user := "root"
+	user := m.sshHandler.SSHUser()
 	alpha := srcPath
 	beta := fmt.Sprintf("%s@localhost:%d:%s", user, LOCAL_PORT_FOR_SSH_TUNNEL, dstPath)
 	daemonProcess := exec.Command(m.mutagenBinaryPath(), "sync", "create", alpha, beta, "-m", "two-way-safe")
@@ -179,7 +189,7 @@ func (m *mutagenSync) ensureSSHConfig() error {
 	}
 	if err := tools.EnsureVoyagerSshConfig(sshConfigPath, voyagerConfigDir, &tools.SSHConfig{
 		Port:             LOCAL_PORT_FOR_SSH_TUNNEL,
-		User:             "root",
+		User:             m.sshHandler.SSHUser(),
 		IdentityFilePath: m.cfg.UserPrivateKeyPath,
 	}); err != nil {
 		return err

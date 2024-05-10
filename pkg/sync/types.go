@@ -2,10 +2,12 @@ package sync
 
 import (
 	"context"
+
+	"github.com/ashishmax31/voyager-cli/pkg/provider"
 )
 
 type Syncer interface {
-	SetupSyncSession(ctx context.Context, spec SourceDestintionList, dstSSHhandler DestinationSSHTunnelHandler) error
+	SetupSyncSession(context.Context, SourceDestintionList, provider.Target) error
 	Sync(context.Context) error
 	Initialized(context.Context) (bool, error)
 	// Status(context.Context) (string, error)

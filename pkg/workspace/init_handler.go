@@ -43,7 +43,7 @@ func (w *WorkspaceHandler) Init(ctx context.Context) error {
 		return availableCond != nil && (availableCond.Status == metav1.ConditionTrue), nil
 	})
 	if err != nil {
-		return fmt.Errorf("timedout waiting for workspace storage to be ready")
+		return workspaceHandlerErr("timedout waiting for workspace storage to be ready")
 	}
 	executablePath, err := os.Executable()
 	if err != nil {
@@ -57,7 +57,7 @@ func (w *WorkspaceHandler) Init(ctx context.Context) error {
 	}
 	// Wait for the forked process to complete.
 	if err := syncProcess.Run(); err != nil {
-		return fmt.Errorf("error when starting voyager init subcommand: %w", err)
+		return workspaceHandlerErr("error when starting voyager init subcommand: %w", err)
 	}
 	return nil
 }

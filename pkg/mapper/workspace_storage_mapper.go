@@ -12,6 +12,10 @@ func WorkspaceCRName(userName string) string {
 	return fmt.Sprintf("%s-workspace", userName)
 }
 
+func WorkspaceStorageName(username string) string {
+	return fmt.Sprintf("%s-storage", username)
+}
+
 const DefaultSize = "2Gi"
 
 func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, namespace string) workspacev1alpha1.WorkspaceStorage {
@@ -42,7 +46,7 @@ func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, nam
 
 	ws := workspacev1alpha1.WorkspaceStorage{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      workspacev1alpha1.WorkspaceStorageName(user),
+			Name:      WorkspaceStorageName(user),
 			Namespace: namespace,
 		},
 		Spec: workspacev1alpha1.WorkspaceStorageSpec{

@@ -11,6 +11,7 @@ import (
 	"github.com/ashishmax31/voyager-cli/pkg/client"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/provider"
+	"github.com/sirupsen/logrus"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,17 +24,49 @@ import (
 )
 
 const (
-	LOCAL_PORT_FOR_SSH_TUNNEL = 17892
+	MaxRetryOnConnectionLoss = 20
 )
+
+const (
+	SERVICE_TARGET = "service"
+	POD_TARGET     = "pod"
+)
+
+type portForwardTarget struct {
+	podName    *string
+	svcName    *string
+	targetType string
+}
+
+func NewServiceTarget(svcName string) provider.Target {
+	return &portForwardTarget{
+		svcName:    &svcName,
+		targetType: SERVICE_TARGET,
+	}
+}
+
+func NewPodTarget(podName string) provider.Target {
+	return &portForwardTarget{
+		podName:    &podName,
+		targetType: POD_TARGET,
+	}
+}
+
+func (p *portForwardTarget) TargetName() string {
+	if p.podName != nil {
+		return *p.podName
+	} else {
+		return *p.svcName
+	}
+}
+
+func (p *portForwardTarget) TargetType() string {
+	return p.targetType
+}
 
 type k8sProvider struct {
 	cfg            *config.Config
 	providerClient client.ProviderClient
-}
-
-type k8sProviderStorageBackend struct {
-	k8sProvider *k8sProvider
-	resourceSvc string
 }
 
 func NewK8sProvider(cfg *config.Config, client client.ProviderClient) provider.Provider {
@@ -43,72 +76,98 @@ func NewK8sProvider(cfg *config.Config, client client.ProviderClient) provider.P
 	}
 }
 
-func (k *k8sProvider) CreateStorageResourceSSHTunnel(storageResourceInternalAddress string) provider.ProviderStorageSSHhandler {
-	return &k8sProviderStorageBackend{
-		k8sProvider: k,
-		resourceSvc: storageResourceInternalAddress,
-	}
+func (k *k8sProvider) SetupSSHTunnel(ctx context.Context, localPort int, target provider.Target) (chan struct{}, error) {
+	logrus.Debug("in setupSSHTunnel")
+	return k.SetupPortForward(ctx, localPort, 22, target)
 }
 
-func (k *k8sProviderStorageBackend) SetupSSHTunnel(ctx context.Context) error {
-	if err := k.setupSSHTunnel(ctx); err != nil {
-		return err
-	}
-	return nil
+func (k *k8sProvider) SSHUser() string {
+	return k.cfg.ProviderConfig.SSHUserName
 }
 
-func (k *k8sProviderStorageBackend) setupSSHTunnel(ctx context.Context) error {
-	println("in setupSSHTunnel")
-	storageSvc := &corev1.Service{}
-	// Name := k.resourceSvc
-	if err := k.k8sProvider.providerClient.Get(
-		ctx, types.NamespacedName{
-			Name:      k.resourceSvc,
-			Namespace: k.k8sProvider.cfg.ProviderConfig.Namespace,
-		},
-		storageSvc,
-	); err != nil {
-		return err
-	}
-	clientSet, err := kubernetes.NewForConfig(k.k8sProvider.providerClient.RestConfig)
-	if err != nil {
-		return err
-	}
-	attachablePod, err := attachablePodForObject(clientSet, storageSvc, time.Second*10)
-	if err != nil {
-		return err
-	}
-	req := clientSet.CoreV1().RESTClient().Post().Resource("pods").Namespace(attachablePod.Namespace).Name(attachablePod.Name).SubResource("portforward")
-
-	transport, upgrader, err := spdy.RoundTripperFor(k.k8sProvider.providerClient.RestConfig)
-	if err != nil {
-		return err
-	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
+func (k *k8sProvider) SetupPortForward(ctx context.Context, localPort int, targetPort int, target provider.Target) (chan struct{}, error) {
 	stopChan := make(chan struct{})
-	readyChan := make(chan struct{})
-	ports := []string{fmt.Sprintf("%d:%d", LOCAL_PORT_FOR_SSH_TUNNEL, 22)}
-	pf, err := portforward.New(dialer, ports, stopChan, readyChan, os.Stdout, os.Stderr)
-	if err != nil {
-		return err
-	}
-
-	// TODO: Retries.
-	go func() {
-		if err := pf.ForwardPorts(); err != nil {
-			fmt.Printf("portforward session errored: %s \n", err.Error())
-			return
-		}
-		fmt.Println("portforward session stopped")
-	}()
-	// Wait for portforward to be ready.
-	<-readyChan
-	// Stop the portforward session when the context is cancelled.
+	portForwardExitChan := make(chan struct{})
+	go k.runPortforwarder(ctx, localPort, targetPort, target, stopChan, portForwardExitChan)
 	go func() {
 		<-ctx.Done()
 		close(stopChan)
 	}()
-	return nil
+	return portForwardExitChan, nil
+}
+
+func (k *k8sProvider) runPortforwarder(ctx context.Context, localport int, targetPort int, target provider.Target, stopChan, exitChan chan struct{}) {
+	defer close(exitChan)
+	defer logrus.Info("portforward session stopped")
+	for attempt := 1; attempt <= MaxRetryOnConnectionLoss; attempt++ {
+		currentReadyChan := make(chan struct{})
+		pf, err := k.newPortForwarder(ctx, localport, targetPort, target, stopChan, currentReadyChan)
+		if err != nil {
+			logrus.Errorf("failed to create portforwarder: %s", err.Error())
+			return
+		}
+		if err := pf.ForwardPorts(); err != nil {
+			if err == portforward.ErrLostConnectionToPod {
+				logrus.Warnf("lost connection to pod... retrying to establish connection, attempt: %d", attempt)
+				continue
+			} else {
+				logrus.Errorf("portforward session errored: %s", err.Error())
+				return
+			}
+		}
+	}
+}
+
+func (k *k8sProvider) newPortForwarder(
+	ctx context.Context,
+	localPort int,
+	targetPort int,
+	target provider.Target,
+	stopChan, readyChan chan struct{}) (*portforward.PortForwarder, error) {
+	clientSet, err := kubernetes.NewForConfig(k.providerClient.RestConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	var attachablePod *corev1.Pod
+	// Target is a service
+	if target.TargetType() == SERVICE_TARGET {
+		storageSvc := &corev1.Service{}
+		if err := k.providerClient.Get(
+			ctx, types.NamespacedName{
+				Name:      target.TargetName(),
+				Namespace: k.cfg.ProviderConfig.Namespace,
+			},
+			storageSvc,
+		); err != nil {
+			return nil, err
+		}
+		attachablePod, err = attachablePodForObject(clientSet, storageSvc, time.Second*10)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		referencedPod := &corev1.Pod{}
+		if err := k.providerClient.Get(
+			ctx, types.NamespacedName{
+				Name:      target.TargetName(),
+				Namespace: k.cfg.ProviderConfig.Namespace,
+			},
+			referencedPod,
+		); err != nil {
+			return nil, err
+		}
+		attachablePod = referencedPod
+	}
+
+	req := clientSet.CoreV1().RESTClient().Post().Resource("pods").Namespace(attachablePod.Namespace).Name(attachablePod.Name).SubResource("portforward")
+	transport, upgrader, err := spdy.RoundTripperFor(k.providerClient.RestConfig)
+	if err != nil {
+		return nil, err
+	}
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
+	ports := []string{fmt.Sprintf("%d:%d", localPort, targetPort)}
+	return portforward.New(dialer, ports, stopChan, readyChan, os.Stdout, os.Stderr)
 }
 
 func attachablePodForObject(client *kubernetes.Clientset, object runtime.Object, timeout time.Duration) (*corev1.Pod, error) {

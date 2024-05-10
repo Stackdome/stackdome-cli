@@ -5,9 +5,15 @@ import (
 )
 
 type Provider interface {
-	CreateStorageResourceSSHTunnel(storageResourceAddress string) ProviderStorageSSHhandler
+	StorageSSHhandler
 }
 
-type ProviderStorageSSHhandler interface {
-	SetupSSHTunnel(context.Context) error
+type Target interface {
+	TargetName() string
+	TargetType() string
+}
+
+type StorageSSHhandler interface {
+	SetupSSHTunnel(ctx context.Context, localPort int, target Target) (chan struct{}, error)
+	SSHUser() string
 }

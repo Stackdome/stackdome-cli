@@ -6,4 +6,5 @@ type KubernetesProviderInfo struct {
 	Token              string `json:"token"`
 	ServiceAccountName string `json:"serviceAccountName"`
 	ServerUrl          string `json:"serverUrl"`
+	SSHUser            string `json:"sshUser"`
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 )
 
 type Config struct {
@@ -14,8 +15,10 @@ type Config struct {
 	Insecure           bool                   `json:"insecure"`
 	ProviderConfig     *ComputeProviderConfig `json:"providerConfig"`
 	Username           string                 `json:"username,omitempty" doc:"User name."`
-	UserPrivateKeyPath string                 `json:"userPrivateKeyPath"`
-	SyncDaemonInfo     *SyncDaemonInfo        `json:"SyncDaemonInfo"`
+	Organisation       string                 `json:"organisation"`
+	TokenValidity      time.Time
+	UserPrivateKeyPath string          `json:"userPrivateKeyPath"`
+	SyncDaemonInfo     *SyncDaemonInfo `json:"SyncDaemonInfo"`
 }
 
 type SyncDaemonInfo struct {
@@ -29,6 +32,7 @@ type ComputeProviderConfig struct {
 	Token              string `json:"token"`
 	CaCert             []byte `json:"caCert"`
 	ServerUrl          string `json:"serverUrl"`
+	SSHUserName        string `json:"SSHUserName"`
 }
 
 func notNull(attr any) bool {
@@ -57,7 +61,7 @@ func (c *Config) Valid() bool {
 	return true
 }
 
-func (c *Config) ConfigLocation() (string, error) {
+func ConfigLocation() (string, error) {
 	if ocmconfig := os.Getenv("VOYAGER_CONFIG"); ocmconfig != "" {
 		return ocmconfig, nil
 	}
@@ -82,42 +86,40 @@ func (c *Config) ConfigDir() (string, error) {
 	return path, nil
 }
 
-func Load() (cfg *Config, err error) {
-	file, err := cfg.ConfigLocation()
+func Load() (*Config, error) {
+	filePath, err := ConfigLocation()
 	if err != nil {
-		return
+		return nil, err
 	}
-	_, err = os.Stat(file)
-	if os.IsNotExist(err) {
-		cfg = &Config{}
-		err = nil
-		return
-	}
+	_, err = os.Stat(filePath)
 	if err != nil {
-		err = fmt.Errorf("can't check if config file '%s' exists: %v", file, err)
-		return
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("cant find voyager config file at: %s", filePath)
+		}
+		return nil, fmt.Errorf("can't check if config file '%s' exists: %w", filePath, err)
 	}
-
-	data, err := os.ReadFile(file)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		err = fmt.Errorf("can't read config file '%s': %v", file, err)
-		return
+		return nil, fmt.Errorf("can't read config file '%s': %v", filePath, err)
 	}
-	cfg = &Config{}
+	cfg := &Config{}
 	if len(data) == 0 {
-		return
+		return nil, fmt.Errorf("empty config file")
 	}
 	err = json.Unmarshal(data, cfg)
 	if err != nil {
-		err = fmt.Errorf("can't parse config file '%s': %v", file, err)
-		return
+		return nil, fmt.Errorf("can't parse config file '%s': %v", filePath, err)
 	}
-	return
+	return cfg, nil
+}
+
+func New() *Config {
+	return &Config{}
 }
 
 // Save the given configuration to the configuration file.
 func Save(cfg *Config) error {
-	file, err := cfg.ConfigLocation()
+	file, err := ConfigLocation()
 	if err != nil {
 		return err
 	}
