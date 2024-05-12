@@ -6,15 +6,14 @@ import (
 	"encoding/hex"
 )
 
-func ComputeDirHash(dir string) string {
-	return genRandomHash()
+func ComputeDirHash(dir string, volumeName string) string {
+	return GenRandomHash()
 }
 
-func genRandomHash() string {
-	randomBytes := make([]byte, 32)
+func GenRandomHash() string {
+	randomBytes := make([]byte, 16)
 	_, err := rand.Read(randomBytes)
 	if err != nil {
-		panic(err)
 		return ""
 	}
 
@@ -24,7 +23,6 @@ func genRandomHash() string {
 	// Write the random bytes to the hash
 	_, err = hash.Write(randomBytes[0:6])
 	if err != nil {
-		panic(err)
 		return ""
 	}
 
@@ -32,5 +30,5 @@ func genRandomHash() string {
 	hashSum := hash.Sum(nil)
 
 	// Convert the hash sum to a hexadecimal string representation
-	return hex.EncodeToString(hashSum[0:6])
+	return hex.EncodeToString(hashSum)
 }

@@ -25,7 +25,7 @@ func newSyncSessionStartCommand() *cobra.Command {
 		Long:  `start a sync sync session which is responsible for syncing local directories mentioned in the voyagerfile against remote volumes`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := startSyncSession(); err != nil {
-				fmt.Printf("sync session failed: %s", err.Error())
+				fmt.Printf("sync session failed: %s\n", err.Error())
 				os.Exit(1)
 			}
 		},

@@ -23,7 +23,7 @@ func NewSyncCommand() *cobra.Command {
 		Long:  `sync local directories mentioned in the voyagerfile against remote volumes`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := sync(); err != nil {
-				fmt.Printf("failed to sync local directories against remote volumes: %s", err.Error())
+				fmt.Printf("failed to sync local directories against remote volumes: %s\n", err.Error())
 				os.Exit(1)
 			}
 		},

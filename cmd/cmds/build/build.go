@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
+	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
@@ -53,19 +54,22 @@ func build(ctx context.Context, args []string) error {
 	}
 
 	resourceToBuild := args[0]
-	if resourceToBuild == "all" {
-		userWorkspace.SetDirHashForAllResources()
-	} else {
-		concernedResource, ok := userWorkspace.Resources[resourceToBuild]
-		if !ok {
-			return fmt.Errorf("build error: specified resource not found in the voyager file")
-		}
-		concernedResource.SetDirHash()
+	if err := validateResourceNameRef(resourceToBuild, userWorkspace); err != nil {
+		return err
 	}
-
 	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
-	return handler.Deploy(ctx)
+	return handler.Build(ctx, resourceToBuild)
+}
+
+func validateResourceNameRef(resourceName string, ws *userworkspace.Workspace) error {
+	if resourceName == "all" {
+		return nil
+	}
+	if _, found := ws.Resources[resourceName]; !found {
+		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
+	}
+	return nil
 }

@@ -31,11 +31,7 @@ func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, nam
 		}
 		if spec.Source != nil {
 			currSpec.Type = workspacev1alpha1.SyncingStorageType
-			if spec.Source.LocalDir.Synced {
-				currSpec.NeedsSync = false
-			} else {
-				currSpec.NeedsSync = true
-			}
+			currSpec.NeedsSync = true
 		} else {
 			currSpec.Type = workspacev1alpha1.EmptyStorageType
 			currSpec.NeedsSync = false
@@ -74,9 +70,8 @@ func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username string, name
 			}
 		} else {
 			currResourceSpec.Spec.ApplicationBuildSpec = &workspacev1alpha1.ApplicationBuildSpec{
-				Context:         userSpec.Build.BuildContext,
-				BuildSourceHash: userSpec.Build.DirHash,
-				VolumeName:      userSpec.Build.SourceVolume,
+				Context:    userSpec.Build.BuildContext,
+				VolumeName: userSpec.Build.SourceVolume,
 			}
 			if userSpec.Build.DockerFilePath != nil {
 				currResourceSpec.Spec.ApplicationBuildSpec.DockerFile = *userSpec.Build.DockerFilePath

@@ -97,9 +97,9 @@ func (w *WorkspaceHandler) markAsSynced(ctx context.Context) error {
 	}
 	if existingWS.HasSyncRequiredStorageResources() {
 		existingWS.MarkAsSynced()
-		fmt.Println("marking as synced")
+		logrus.Debug("marking as synced")
 		for _, spec := range existingWS.Spec.ResourceStorageSpecs {
-			fmt.Printf("resource needssync: %+v \n", spec.NeedsSync)
+			logrus.Debugf("resource needssync: %+v \n", spec.NeedsSync)
 		}
 		return w.session.UpdateResourceInProvider(ctx, existingWS)
 	}

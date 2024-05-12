@@ -19,7 +19,7 @@ func newSyncSessionStopCommand() *cobra.Command {
 		Long:  `Stop a sync sync session`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := stopSyncSession(); err != nil {
-				fmt.Printf("failed to stop sync session: %s", err.Error())
+				fmt.Printf("failed to stop sync session: %s\n", err.Error())
 				os.Exit(1)
 			}
 		},

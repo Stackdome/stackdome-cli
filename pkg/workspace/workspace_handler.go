@@ -37,19 +37,18 @@ func NewWorkspaceStorageHandler(session session.Session, userdefinedWorkspace vo
 	return w, nil
 }
 
-func (w *WorkspaceHandler) workspacePresent(ctx context.Context, ws *workspacev1alpha1.Workspace) (bool, error) {
+func (w *WorkspaceHandler) getWorkspace(ctx context.Context, ws *workspacev1alpha1.Workspace) (*workspacev1alpha1.Workspace, bool, error) {
 	existing := &workspacev1alpha1.Workspace{}
 	if err := w.session.GetResourceFromProvider(ctx,
 		types.NamespacedName{Name: ws.Name, Namespace: ws.Namespace},
 		existing,
 	); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, nil
+			return nil, false, nil
 		}
-		return false, err
+		return nil, false, err
 	}
-	ws.ResourceVersion = existing.ResourceVersion
-	return true, nil
+	return existing, true, nil
 }
 
 func workspaceHandlerErr(errString string, args ...any) error {

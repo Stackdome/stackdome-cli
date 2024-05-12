@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ashishmax31/voyager-cli/pkg/tools"
 	"gopkg.in/yaml.v2"
 )
 
@@ -21,8 +20,6 @@ type VolumeSpec struct {
 type LocalDir struct {
 	Path string `yaml:"path"`
 	Sync bool   `yaml:"sync"`
-	// Internal
-	Synced bool
 }
 
 type VolumeSource struct {
@@ -42,8 +39,6 @@ type WorkspaceResourceSpec struct {
 	Ports                []Port                `yaml:"ports"`
 	Build                *ApplicationBuildSpec `yaml:"build" validate:"required_without=Image"`
 	Image                *string               `yaml:"image" validate:"required_without=Build"`
-	// Internal
-	NeedsSync bool
 }
 
 type Port struct {
@@ -90,28 +85,16 @@ func Unmarshal(voyagerFilePath string) (*Workspace, error) {
 	return &workspace, nil
 }
 
-func (r *VolumeSpec) MarkAsSynced() {
-	if r.Source != nil && r.Source.LocalDir != nil {
-		r.Source.LocalDir.Synced = true
-	}
-}
-
-func (w *Workspace) SetDirHashForAllResources() {
+func (w *Workspace) SetDirHashForAllResources(hash string) {
 	for _, resource := range w.Resources {
 		if resource.Build != nil {
-			resource.Build.DirHash = tools.ComputeDirHash(resource.Build.SourceVolume)
+			resource.Build.DirHash = hash
 		}
 	}
 }
 
-func (r *WorkspaceResourceSpec) SetDirHash() {
+func (r *WorkspaceResourceSpec) SetDirHash(hash string) {
 	if r.Build != nil {
-		r.Build.DirHash = tools.ComputeDirHash(r.Build.SourceVolume)
-	}
-}
-
-func (w *Workspace) SetAsReady() {
-	for _, resource := range w.Resources {
-		resource.NeedsSync = false
+		r.Build.DirHash = hash
 	}
 }

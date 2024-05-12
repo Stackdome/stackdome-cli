@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
-	"github.com/sirupsen/logrus"
-
 	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
@@ -52,23 +49,11 @@ func deploy(ctx context.Context) error {
 	if err := userWorkspace.Process(); err != nil {
 		return err
 	}
-	userWorkspace.SetAsReady()
-	userWorkspace.SetDirHashForAllResources()
-	PrintHashAndSyncStatus(*userWorkspace)
+
 	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
 
 	return handler.Deploy(ctx)
-}
-
-func PrintHashAndSyncStatus(in userworkspace.Workspace) {
-	for key, value := range in.Resources {
-		if value.Build != nil {
-			logrus.Debugf("workspace resource:%s, Sourcehash: %s, NeedsSync: %v\n", key, value.Build.DirHash, value.NeedsSync)
-		} else {
-			logrus.Debugf("workspace resource:%s, NeedsSync: %v\n", key, value.NeedsSync)
-		}
-	}
 }
