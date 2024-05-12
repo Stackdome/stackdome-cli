@@ -7,6 +7,7 @@ import (
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/deploy"
 	initcmd "github.com/ashishmax31/voyager-cli/cmd/cmds/init"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/login"
+	"github.com/ashishmax31/voyager-cli/cmd/cmds/restart"
 	synccmd "github.com/ashishmax31/voyager-cli/cmd/cmds/sync"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/syncsession"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/validate"
@@ -28,8 +29,9 @@ func main() {
 	syncCmd := synccmd.NewSyncCommand()
 	syncSessionCmd := syncsession.NewSyncSessionCommand()
 	validateCmd := validate.NewValidateCommand()
+	restartCmd := restart.NewRestartCommand()
 
-	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd)
+	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd)
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "debug", "Set the log level (debug, info, warn)")
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
