@@ -10,7 +10,9 @@ import (
 )
 
 const (
-	VoyagerFilePathFlag = "voyagerfile-path"
+	VoyagerFilePathFlag     = "voyagerfile-path"
+	AllResourcesFlag        = "all"
+	InteractiveSessionFlage = "interactive"
 )
 
 func findVoyagerFile(dir string) (string, error) {

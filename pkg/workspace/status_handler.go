@@ -36,13 +36,15 @@ func (w *WorkspaceHandler) Status(ctx context.Context, resourceName string) (*us
 		return nil, fmt.Errorf("workspace not yet deployed. Please run voyager deploy first.")
 	case !WstoragePresent:
 		return nil, fmt.Errorf("workspace storage not yet provisioned. Please run voyager init first.")
+	case resourceName == "all":
+		return w.workspaceStatus(ctx, existingWS, existingWStorage)
 	default:
-		return w.status(ctx, existingWS, existingWStorage)
+		return w.workspaceResourceStatus(ctx, existingWS, resourceName)
 	}
 
 }
 
-func (w *WorkspaceHandler) status(
+func (w *WorkspaceHandler) workspaceStatus(
 	ctx context.Context,
 	existingWS *workspacev1alpha1.Workspace,
 	existingWStorage *workspacev1alpha1.WorkspaceStorage) (*userworkspace.WorkspaceStatus, error) {
@@ -55,6 +57,23 @@ func (w *WorkspaceHandler) status(
 	}
 	res.ResourceStatuses = resourceStatuses
 	res.VolumeStatuses = w.getVolumeStatuses(ctx, existingWStorage)
+	return res, nil
+}
+
+func (w *WorkspaceHandler) workspaceResourceStatus(
+	ctx context.Context,
+	existingWS *workspacev1alpha1.Workspace,
+	resourceName string) (*userworkspace.WorkspaceStatus, error) {
+
+	res := &userworkspace.WorkspaceStatus{}
+	referencedResource := &workspacev1alpha1.WorkspaceResource{}
+	if err := w.session.GetResourceFromProvider(
+		ctx,
+		types.NamespacedName{Name: resourceName, Namespace: existingWS.Namespace},
+		referencedResource); err != nil {
+		return nil, err
+	}
+	res.ResourceStatuses = []userworkspace.ResourceStatus{getResourceStatus(referencedResource, resourceName)}
 	return res, nil
 }
 
@@ -113,27 +132,31 @@ func (w *WorkspaceHandler) getResourceStatuses(ctx context.Context, existingWS *
 
 	res := []userworkspace.ResourceStatus{}
 	for resourceName, resource := range resources {
-		availableCond := meta.FindStatusCondition(resource.Status.Conditions, string(workspacev1alpha1.WorkspaceResourceStatusAvailable))
-		curr := userworkspace.ResourceStatus{
-			ResourceName: resourceName,
-			Addresses:    mapExternalAddressesToAddressStatus(resource.Status.ExternalAddress),
-			BuildStatus:  mapBuildStatus(resource.Status.CurrentBuild),
-		}
-		switch {
-		case availableCond == nil:
-			curr.Available = false
-		case availableCond.Status == metav1.ConditionTrue:
-			curr.Available = true
-			curr.Message = availableCond.Message
-			curr.Reason = availableCond.Reason
-		default:
-			curr.Available = false
-			curr.Message = availableCond.Message
-			curr.Reason = availableCond.Reason
-		}
-		res = append(res, curr)
+		res = append(res, getResourceStatus(resource, resourceName))
 	}
 	return res, nil
+}
+
+func getResourceStatus(in *workspacev1alpha1.WorkspaceResource, resourceName string) userworkspace.ResourceStatus {
+	availableCond := meta.FindStatusCondition(in.Status.Conditions, string(workspacev1alpha1.WorkspaceResourceStatusAvailable))
+	curr := userworkspace.ResourceStatus{
+		ResourceName: resourceName,
+		Addresses:    mapExternalAddressesToAddressStatus(in.Status.ExternalAddress),
+		BuildStatus:  mapBuildStatus(in.Status.CurrentBuild),
+	}
+	switch {
+	case availableCond == nil:
+		curr.Available = false
+	case availableCond.Status == metav1.ConditionTrue:
+		curr.Available = true
+		curr.Message = availableCond.Message
+		curr.Reason = availableCond.Reason
+	default:
+		curr.Available = false
+		curr.Message = availableCond.Message
+		curr.Reason = availableCond.Reason
+	}
+	return curr
 }
 
 func mapExternalAddressesToAddressStatus(in []workspacev1alpha1.ExternalAddress) []userworkspace.Address {
@@ -147,11 +170,11 @@ func mapExternalAddressesToAddressStatus(in []workspacev1alpha1.ExternalAddress)
 	return res
 }
 
-func mapBuildStatus(in *workspacev1alpha1.BuildStatus) userworkspace.BuildStatus {
+func mapBuildStatus(in *workspacev1alpha1.BuildStatus) *userworkspace.BuildStatus {
 	if in == nil || in.Available == nil {
-		return userworkspace.BuildStatus{}
+		return nil
 	}
-	res := userworkspace.BuildStatus{}
+	res := &userworkspace.BuildStatus{}
 	res.Completed = *in.Available
 	res.BuildName = in.Name
 	res.Message = *in.Message

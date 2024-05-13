@@ -5,6 +5,7 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/build"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/deploy"
+	"github.com/ashishmax31/voyager-cli/cmd/cmds/exec"
 	initcmd "github.com/ashishmax31/voyager-cli/cmd/cmds/init"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/login"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/restart"

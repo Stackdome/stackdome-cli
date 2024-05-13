@@ -13,7 +13,7 @@ type ResourceStatus struct {
 	Reason       string
 	Message      string
 	Addresses    []Address
-	BuildStatus  BuildStatus
+	BuildStatus  *BuildStatus
 }
 
 type BuildStatus struct {

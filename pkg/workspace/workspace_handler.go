@@ -62,6 +62,17 @@ func (w *WorkspaceHandler) getWorkspaceStorage(ctx context.Context, desiredWStor
 	return existingWStorage, true, nil
 }
 
+func (w *WorkspaceHandler) getWorkspaceResource(ctx context.Context, resourceName string) (*workspacev1alpha1.WorkspaceResource, error) {
+	referencedResource := &workspacev1alpha1.WorkspaceResource{}
+	if err := w.session.GetResourceFromProvider(
+		ctx,
+		types.NamespacedName{Name: resourceName, Namespace: w.session.Config().ProviderConfig.Namespace},
+		referencedResource); err != nil {
+		return nil, err
+	}
+	return referencedResource, nil
+}
+
 func workspaceHandlerErr(errString string, args ...any) error {
 	return fmt.Errorf(errString, args...)
 }
