@@ -70,6 +70,17 @@ func (m *mutagenSync) Sync(context.Context) error {
 	return nil
 }
 
+func (m *mutagenSync) Status(context.Context) error {
+	syncProcess := exec.Command(m.mutagenBinaryPath(), "sync", "list")
+	syncProcess.Stdout = os.Stdout
+	syncProcess.Stderr = os.Stderr
+	// Wait for the forked process to complete.
+	if err := syncProcess.Run(); err != nil {
+		return fmt.Errorf("error when checking sync status: %w", err)
+	}
+	return nil
+}
+
 func (m *mutagenSync) StopSyncSession(context.Context) error {
 	if err := os.Remove(m.lockPath); err != nil {
 		if pathError, ok := err.(*os.PathError); ok && os.IsNotExist(pathError.Err) {

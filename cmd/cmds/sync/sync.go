@@ -29,6 +29,8 @@ func NewSyncCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
+	statusCmd := NewSyncStatusCommand()
+	syncCmd.AddCommand(statusCmd)
 	syncCmd.Flags().StringVar(&syncArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return syncCmd
 }

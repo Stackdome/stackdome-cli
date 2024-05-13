@@ -8,6 +8,7 @@ import (
 	initcmd "github.com/ashishmax31/voyager-cli/cmd/cmds/init"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/login"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/restart"
+	"github.com/ashishmax31/voyager-cli/cmd/cmds/status"
 	synccmd "github.com/ashishmax31/voyager-cli/cmd/cmds/sync"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/syncsession"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/validate"
@@ -30,9 +31,10 @@ func main() {
 	syncSessionCmd := syncsession.NewSyncSessionCommand()
 	validateCmd := validate.NewValidateCommand()
 	restartCmd := restart.NewRestartCommand()
+	statusCmd := status.NewStatusCommand()
 
-	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd)
-	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "debug", "Set the log level (debug, info, warn)")
+	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd, statusCmd)
+	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, info, warn)")
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		logrus.Fatalf("Invalid log level: %v", err)

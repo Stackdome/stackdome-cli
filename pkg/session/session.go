@@ -7,6 +7,7 @@ import (
 	"github.com/ashishmax31/voyager-cli/pkg/client"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	workspacev1alpha1 "soradev.io/cluster-agent/api/v1alpha1"
 )
 
 type session struct {
@@ -20,6 +21,7 @@ type Session interface {
 	GetResourceFromProvider(ctx context.Context, key k8sclient.ObjectKey, obj k8sclient.Object, opts ...k8sclient.GetOption) error
 	UpdateResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.UpdateOption) error
 	DeleteResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.DeleteOption) error
+	GetWorkspaceVolumesFromProvider(ctx context.Context, wstorage *workspacev1alpha1.WorkspaceStorage) ([]workspacev1alpha1.WorkspaceVolume, error)
 	ProviderClient() *client.ProviderClient
 	Config() *config.Config
 }
@@ -68,4 +70,17 @@ func (s *session) UpdateResourceInProvider(ctx context.Context, obj k8sclient.Ob
 
 func (s *session) DeleteResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.DeleteOption) error {
 	return s.providerClient.Delete(ctx, obj, opts...)
+}
+
+func (s *session) GetWorkspaceVolumesFromProvider(
+	ctx context.Context, wstorage *workspacev1alpha1.WorkspaceStorage) ([]workspacev1alpha1.WorkspaceVolume, error) {
+	workspaceVolumeList := &workspacev1alpha1.WorkspaceVolumeList{}
+	if err := s.providerClient.List(
+		ctx,
+		workspaceVolumeList,
+		k8sclient.InNamespace(wstorage.Namespace),
+		k8sclient.MatchingLabels{workspacev1alpha1.WorkspaceStorageVolumeLabel: wstorage.Name}); err != nil {
+		return nil, err
+	}
+	return workspaceVolumeList.Items, nil
 }

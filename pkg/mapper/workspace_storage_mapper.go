@@ -31,10 +31,10 @@ func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, nam
 		}
 		if spec.Source != nil {
 			currSpec.Type = workspacev1alpha1.SyncingStorageType
-			currSpec.NeedsSync = true
+			currSpec.NeedsSyncBeforeUse = true
 		} else {
 			currSpec.Type = workspacev1alpha1.EmptyStorageType
-			currSpec.NeedsSync = false
+			currSpec.NeedsSyncBeforeUse = false
 			currSpec.DontAllowSync = true
 		}
 		resourceStorageSpecList = append(resourceStorageSpecList, currSpec)

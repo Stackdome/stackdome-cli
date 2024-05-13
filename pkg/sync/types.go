@@ -11,5 +11,5 @@ type Syncer interface {
 	StopSyncSession(context.Context) error
 	Sync(context.Context) error
 	Initialized(context.Context) (bool, error)
-	// Status(context.Context) (string, error)
+	Status(context.Context) error
 }

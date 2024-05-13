@@ -67,6 +67,10 @@ func (w *WorkspaceHandler) StartSyncSession(ctx context.Context) error {
 	return nil
 }
 
+func (w *WorkspaceHandler) SyncStatus(ctx context.Context) error {
+	return w.syncHandler.Status(ctx)
+}
+
 func (w *WorkspaceHandler) StopSyncSession(ctx context.Context) error {
 	return w.syncHandler.StopSyncSession(ctx)
 }
@@ -96,12 +100,20 @@ func (w *WorkspaceHandler) markAsSynced(ctx context.Context) error {
 		return getErr
 	}
 	if existingWS.HasSyncRequiredStorageResources() {
-		existingWS.MarkAsSynced()
-		logrus.Debug("marking as synced")
-		for _, spec := range existingWS.Spec.ResourceStorageSpecs {
-			logrus.Debugf("resource needssync: %+v \n", spec.NeedsSync)
+		volumes, err := w.session.GetWorkspaceVolumesFromProvider(ctx, existingWS)
+		if err != nil {
+			return fmt.Errorf("workspace volumes fetch error: %w", err)
 		}
-		return w.session.UpdateResourceInProvider(ctx, existingWS)
+		logrus.Debug("marking as synced")
+		for i := range volumes {
+			volume := &volumes[i]
+			if volume.Spec.NeedsSyncBeforeUse {
+				volume.MarkAsSynced()
+				if err := w.session.UpdateResourceInProvider(ctx, volume); err != nil {
+					return fmt.Errorf("failed to mark volume '%s' as synced: %w", volume.Name, err)
+				}
+			}
+		}
 	}
 	return nil
 }
