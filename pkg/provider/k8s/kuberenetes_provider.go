@@ -1,11 +1,14 @@
 package k8s
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ashishmax31/voyager-cli/pkg/client"
@@ -23,6 +26,7 @@ import (
 	"k8s.io/kubectl/pkg/polymorphichelpers"
 	"k8s.io/kubectl/pkg/scheme"
 	"k8s.io/kubectl/pkg/util/podutils"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -127,6 +131,81 @@ func (k *k8sProvider) Execute(ctx context.Context, target provider.Target, cmd [
 		return err
 	}
 	return executor.StreamWithContext(ctx, streamOptions)
+}
+
+func (k *k8sProvider) StreamLogs(ctx context.Context, targets []provider.Target, logOptions provider.LogOptions) error {
+	if len(targets) == 0 {
+		return nil
+	}
+
+	clientset, err := kubernetes.NewForConfig(k.providerClient.RestConfig)
+	if err != nil {
+		return err
+	}
+
+	concernedPods := make(map[string]*corev1.Pod)
+	for _, target := range targets {
+		attachablePod, err := k.attachablePodFromTarget(ctx, clientset, target)
+		if err != nil {
+			return err
+		}
+		concernedPods[target.TargetName()] = attachablePod
+	}
+	var wg sync.WaitGroup
+
+	wg.Add(len(concernedPods))
+
+	outputChan := make(chan string)
+	for resourceName, pod := range concernedPods {
+		go func(pod *corev1.Pod, resourceName string) {
+			defer wg.Done()
+			podLogOptions := &corev1.PodLogOptions{}
+			if logOptions.Follow {
+				podLogOptions.Follow = true
+			}
+			if logOptions.TailLines != 0 {
+				podLogOptions.TailLines = ptr.To(logOptions.TailLines)
+			}
+			req := clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, podLogOptions)
+			podLogs, err := req.Stream(ctx)
+			if err != nil {
+				if err == context.Canceled {
+					return
+				}
+				outputChan <- fmt.Sprintf("error fetching logs for resource %s: %v\n", resourceName, err)
+				return
+			}
+			defer podLogs.Close()
+
+			reader := bufio.NewReader(podLogs)
+			for {
+				line, err := reader.ReadString('\n')
+				if err == io.EOF {
+					break
+				}
+				if err == context.Canceled {
+					return
+				}
+				if err != nil {
+					outputChan <- fmt.Sprintf("error reading logs for resource %s: %v\n", resourceName, err)
+					break
+				}
+				outputChan <- fmt.Sprintf("[%s] %s", resourceName, line)
+			}
+
+			outputChan <- fmt.Sprintln()
+		}(pod, resourceName)
+	}
+
+	go func() {
+		wg.Wait()
+		close(outputChan)
+	}()
+
+	for output := range outputChan {
+		fmt.Print(output)
+	}
+	return nil
 }
 
 func (k *k8sProvider) SetupPortForward(ctx context.Context, localPort int, targetPort int, target provider.Target) (chan struct{}, error) {
