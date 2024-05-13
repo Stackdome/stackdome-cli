@@ -6,6 +6,7 @@ import (
 
 type Provider interface {
 	StorageSSHhandler
+	Execute(ctx context.Context, target Target, cmd []string, interactive bool) error
 }
 
 type Target interface {

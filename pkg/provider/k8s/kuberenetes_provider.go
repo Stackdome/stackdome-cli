@@ -87,6 +87,48 @@ func (k *k8sProvider) SSHUser() string {
 	return k.cfg.ProviderConfig.SSHUserName
 }
 
+func (k *k8sProvider) Execute(ctx context.Context, target provider.Target, cmd []string, interactive bool) error {
+	clientset, err := kubernetes.NewForConfig(k.providerClient.RestConfig)
+	if err != nil {
+		return err
+	}
+	attachablePod, err := k.attachablePodFromTarget(ctx, clientset, target)
+	if err != nil {
+		return err
+	}
+
+	req := clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(attachablePod.Name).
+		Namespace(attachablePod.Namespace).
+		SubResource("exec")
+
+	execOptions := &corev1.PodExecOptions{
+		Command: cmd,
+		Stdout:  true,
+		Stderr:  true,
+	}
+
+	streamOptions := remotecommand.StreamOptions{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+	if interactive {
+		execOptions.TTY = true
+		execOptions.Stdin = true
+		streamOptions.Tty = true
+		streamOptions.Stdin = os.Stdin
+	}
+
+	req.VersionedParams(execOptions, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(k.providerClient.RestConfig, "POST", req.URL())
+	if err != nil {
+		return err
+	}
+	return executor.StreamWithContext(ctx, streamOptions)
+}
+
 func (k *k8sProvider) SetupPortForward(ctx context.Context, localPort int, targetPort int, target provider.Target) (chan struct{}, error) {
 	stopChan := make(chan struct{})
 	portForwardExitChan := make(chan struct{})
@@ -130,9 +172,22 @@ func (k *k8sProvider) newPortForwarder(
 	if err != nil {
 		return nil, err
 	}
+	attachablePod, err := k.attachablePodFromTarget(ctx, clientSet, target)
+	if err != nil {
+		return nil, err
+	}
 
-	var attachablePod *corev1.Pod
-	// Target is a service
+	req := clientSet.CoreV1().RESTClient().Post().Resource("pods").Namespace(attachablePod.Namespace).Name(attachablePod.Name).SubResource("portforward")
+	transport, upgrader, err := spdy.RoundTripperFor(k.providerClient.RestConfig)
+	if err != nil {
+		return nil, err
+	}
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
+	ports := []string{fmt.Sprintf("%d:%d", localPort, targetPort)}
+	return portforward.New(dialer, ports, stopChan, readyChan, os.Stdout, os.Stderr)
+}
+
+func (k *k8sProvider) attachablePodFromTarget(ctx context.Context, client *kubernetes.Clientset, target provider.Target) (*corev1.Pod, error) {
 	if target.TargetType() == SERVICE_TARGET {
 		storageSvc := &corev1.Service{}
 		if err := k.providerClient.Get(
@@ -144,32 +199,23 @@ func (k *k8sProvider) newPortForwarder(
 		); err != nil {
 			return nil, err
 		}
-		attachablePod, err = attachablePodForObject(clientSet, storageSvc, time.Second*10)
+		attachablePod, err := attachablePodForObject(client, storageSvc, time.Second*10)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		referencedPod := &corev1.Pod{}
-		if err := k.providerClient.Get(
-			ctx, types.NamespacedName{
-				Name:      target.TargetName(),
-				Namespace: k.cfg.ProviderConfig.Namespace,
-			},
-			referencedPod,
-		); err != nil {
-			return nil, err
-		}
-		attachablePod = referencedPod
+		return attachablePod, nil
 	}
-
-	req := clientSet.CoreV1().RESTClient().Post().Resource("pods").Namespace(attachablePod.Namespace).Name(attachablePod.Name).SubResource("portforward")
-	transport, upgrader, err := spdy.RoundTripperFor(k.providerClient.RestConfig)
-	if err != nil {
+	referencedPod := &corev1.Pod{}
+	if err := k.providerClient.Get(
+		ctx, types.NamespacedName{
+			Name:      target.TargetName(),
+			Namespace: k.cfg.ProviderConfig.Namespace,
+		},
+		referencedPod,
+	); err != nil {
 		return nil, err
 	}
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", req.URL())
-	ports := []string{fmt.Sprintf("%d:%d", localPort, targetPort)}
-	return portforward.New(dialer, ports, stopChan, readyChan, os.Stdout, os.Stderr)
+	return referencedPod, nil
 }
 
 func attachablePodForObject(client *kubernetes.Clientset, object runtime.Object, timeout time.Duration) (*corev1.Pod, error) {

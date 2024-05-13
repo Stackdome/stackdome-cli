@@ -33,8 +33,9 @@ func main() {
 	validateCmd := validate.NewValidateCommand()
 	restartCmd := restart.NewRestartCommand()
 	statusCmd := status.NewStatusCommand()
+	execCmd := exec.NewExecCommand()
 
-	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd, statusCmd)
+	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd, statusCmd, execCmd)
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, info, warn)")
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
