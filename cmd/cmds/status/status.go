@@ -23,15 +23,15 @@ var statusArgs struct {
 func NewStatusCommand() *cobra.Command {
 	var statusCmd = &cobra.Command{
 		Use:   "status",
-		Short: "Get the status of a resource/all resources. voyager status",
-		Long:  `Get the status of a resource/all resources.`,
+		Short: "Get the status of a resource/all resources",
+		Long:  `Get the status of a resource/all resources. Pass --all or -a flag to print the status of all resources.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := status(context.Background(), args); err != nil {
-				fmt.Printf("build command errored: %s \n", err.Error())
+				fmt.Printf("status error: %s \n", err.Error())
 				os.Exit(1)
 			}
 		},
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 	}
 	statusCmd.Flags().StringVar(&statusArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	statusCmd.Flags().BoolVarP(&statusArgs.all, common.AllResourcesFlag, "a", false, fmt.Sprintf("--%s", common.AllResourcesFlag))
@@ -51,7 +51,7 @@ func status(ctx context.Context, args []string) error {
 		return err
 	}
 	// Provider initialized.
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}
@@ -59,14 +59,8 @@ func status(ctx context.Context, args []string) error {
 	if err := userWorkspace.Process(); err != nil {
 		return err
 	}
-	var resourceRef string
-	if statusArgs.all {
-		resourceRef = "all"
-	} else {
-		resourceRef = args[0]
-	}
 
-	if err := validateResourceNameRef(resourceRef, userWorkspace); err != nil {
+	if err := common.ValidateResourceNameRef(args, userWorkspace, statusArgs.all); err != nil {
 		return err
 	}
 
@@ -74,7 +68,12 @@ func status(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	workspaceStatus, err := handler.Status(ctx, resourceRef)
+
+	if statusArgs.all {
+		args = []string{"all"}
+	}
+
+	workspaceStatus, err := handler.Status(ctx, args[0])
 	if err != nil {
 		return err
 	}

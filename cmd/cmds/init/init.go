@@ -24,7 +24,7 @@ func NewInitCommand() *cobra.Command {
 		Long:  `Initialize your voyager workspace environment`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := run(); err != nil {
-				fmt.Printf("failed to initialize voyager: %s \n", err.Error())
+				fmt.Printf("stackdome init error: %s \n", err.Error())
 				os.Exit(1)
 			}
 		},
@@ -47,7 +47,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	session, err := session.NewSession(cfg)
+	session, err := session.NewSession(cfg, false)
+	if err != nil {
+		return err
+	}
+	err = session.InitializeProvider(context.Background())
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
@@ -47,7 +46,7 @@ func exec(ctx context.Context, args []string) error {
 		return err
 	}
 	// Provider initialized.
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}
@@ -56,8 +55,7 @@ func exec(ctx context.Context, args []string) error {
 		return err
 	}
 
-	resourceRef := args[0]
-	if err := validateResourceNameRef(resourceRef, userWorkspace, false); err != nil {
+	if err := common.ValidateResourceNameRef(args, userWorkspace, false); err != nil {
 		return err
 	}
 	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
@@ -73,7 +71,7 @@ func exec(ctx context.Context, args []string) error {
 		<-signalTermination
 		cancelFn()
 	}()
-	return ignoreCtxCancelledErr(handler.Execute(ctx, resourceRef, args[1:], execArgs.interactive))
+	return ignoreCtxCancelledErr(handler.Execute(ctx, args[0], args[1:], execArgs.interactive))
 }
 
 func ignoreCtxCancelledErr(err error) error {
@@ -81,14 +79,4 @@ func ignoreCtxCancelledErr(err error) error {
 		return nil
 	}
 	return err
-}
-
-func validateResourceNameRef(resourceName string, ws *userworkspace.Workspace, allowAll bool) error {
-	if resourceName == "all" && allowAll {
-		return nil
-	}
-	if _, found := ws.Resources[resourceName]; !found {
-		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
-	}
-	return nil
 }

@@ -45,7 +45,7 @@ func startSyncSession() error {
 		return err
 	}
 
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}
@@ -65,10 +65,10 @@ func startSyncSession() error {
 	signal.Notify(signalTermination, syscall.SIGINT, syscall.SIGTERM)
 	exitedChan := make(chan struct{})
 	go func() {
+		defer close(exitedChan)
 		if err := syncHandler.StartSyncSession(ctx); err != nil {
 			fmt.Printf("sync session stopped with err: %s \n", err.Error())
 		}
-		close(exitedChan)
 	}()
 	select {
 	case <-exitedChan:

@@ -47,33 +47,16 @@ func login() error {
 
 	cfg := config.New()
 	ctx := context.Background()
-	cfg.AccessToken = args.token
-	cfg.VoyagerServerUrl = args.voyagerServerUrl
-	cfg.Insecure = args.insecure
-
-	voyagerClient := client.NewVoyagerServerClient(args.token, args.voyagerServerUrl, args.insecure)
-	resp, err := voyagerClient.GetUserInfo(ctx)
+	stackdomeClient := client.NewStackdomeClient(args.token, args.voyagerServerUrl, args.insecure)
+	resp, err := stackdomeClient.GetUser(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate with voyager server: %w", err)
 	}
-	cfg.Username = resp.Username
+	cfg.AccessToken = args.token
+	cfg.VoyagerServerUrl = args.voyagerServerUrl
+	cfg.Insecure = args.insecure
+	cfg.Username = resp.Name
 	cfg.Organisation = resp.Organisation
-	cfg.TokenValidity = resp.TokenValidTill
-
-	providerResp, err := voyagerClient.InitializeProvider(ctx)
-	if err != nil {
-		return err
-	}
-
-	if cfg.ProviderConfig == nil {
-		cfg.ProviderConfig = &config.ComputeProviderConfig{}
-	}
-	cfg.ProviderConfig.CaCert = providerResp.Cacrt
-	cfg.ProviderConfig.Namespace = providerResp.Namespace
-	cfg.ProviderConfig.Token = providerResp.Token
-	cfg.ProviderConfig.ServerUrl = providerResp.ServerUrl
-	cfg.UserPrivateKeyPath = "/Users/ashishanand/.voyager/id_rsa"
-	cfg.ProviderConfig.SSHUserName = providerResp.SSHUser
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}

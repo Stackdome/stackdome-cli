@@ -38,7 +38,7 @@ func stopSyncSession() error {
 		return err
 	}
 
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}

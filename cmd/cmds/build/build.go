@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
@@ -15,21 +14,23 @@ import (
 
 var buildArgs struct {
 	voyagerFilePath string
+	all             bool
 }
 
 func NewBuildCommand() *cobra.Command {
 	var buildCmd = &cobra.Command{
 		Use:   "build",
 		Short: "Trigger a new build for a resource/all resources.",
-		Long:  `Trigger a new build for a resource/all resources.`,
+		Long:  `Trigger a new build for a resource/all resources. Pass --all or -a flag to trigger a new build of all resources.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := build(context.Background(), args); err != nil {
-				fmt.Printf("build command errored: %s \n", err.Error())
+				fmt.Printf("build error: %s \n", err.Error())
 				os.Exit(1)
 			}
 		},
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 	}
+	buildCmd.Flags().BoolVarP(&buildArgs.all, "all", "a", false, "-a or --all")
 	buildCmd.Flags().StringVar(&buildArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return buildCmd
 }
@@ -44,7 +45,7 @@ func build(ctx context.Context, args []string) error {
 		return err
 	}
 	// Provider initialized.
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}
@@ -53,23 +54,15 @@ func build(ctx context.Context, args []string) error {
 		return err
 	}
 
-	resourceToBuild := args[0]
-	if err := validateResourceNameRef(resourceToBuild, userWorkspace); err != nil {
+	if err := common.ValidateResourceNameRef(args, userWorkspace, buildArgs.all); err != nil {
 		return err
 	}
 	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
-	return handler.Build(ctx, resourceToBuild)
-}
-
-func validateResourceNameRef(resourceName string, ws *userworkspace.Workspace) error {
-	if resourceName == "all" {
-		return nil
+	if buildArgs.all {
+		args = []string{"all"}
 	}
-	if _, found := ws.Resources[resourceName]; !found {
-		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
-	}
-	return nil
+	return handler.Build(ctx, args[0])
 }

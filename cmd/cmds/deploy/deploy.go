@@ -22,7 +22,7 @@ func NewDeployCommand() *cobra.Command {
 		Long:  `Deploy the resources specified in the voyagerfile`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := deploy(context.Background()); err != nil {
-				fmt.Printf("deploy cmd errored: %s \n", err.Error())
+				fmt.Printf("deploy error: %s \n", err.Error())
 			}
 		},
 		Args: cobra.NoArgs,
@@ -41,7 +41,7 @@ func deploy(ctx context.Context) error {
 		return err
 	}
 	// Provider initialized.
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}

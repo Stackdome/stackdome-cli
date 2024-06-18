@@ -15,21 +15,23 @@ import (
 
 var restartArgs struct {
 	voyagerFilePath string
+	all             bool
 }
 
 func NewRestartCommand() *cobra.Command {
 	var restartCmd = &cobra.Command{
 		Use:   "restart",
-		Short: "Restart a resource/all resources.",
-		Long:  `Restart a resource/all resources.`,
+		Short: "Restart a resource.",
+		Long:  `Restart a resource. Pass --all or -a flag to restart all resources`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := restart(context.Background(), args); err != nil {
 				fmt.Printf("restart error: %s \n", err.Error())
 				os.Exit(1)
 			}
 		},
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 	}
+	restartCmd.Flags().BoolVarP(&restartArgs.all, "all", "a", false, "-a or --all")
 	restartCmd.Flags().StringVar(&restartArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return restartCmd
 }
@@ -44,7 +46,7 @@ func restart(ctx context.Context, args []string) error {
 		return err
 	}
 	// Provider initialized.
-	currSession, err := session.NewSession(cfg)
+	currSession, err := session.NewSession(cfg, true)
 	if err != nil {
 		return err
 	}
@@ -53,15 +55,17 @@ func restart(ctx context.Context, args []string) error {
 		return err
 	}
 
-	resourceToRestart := args[0]
-	if err := validateResourceNameRef(resourceToRestart, userWorkspace); err != nil {
+	if err := common.ValidateResourceNameRef(args, userWorkspace, restartArgs.all); err != nil {
 		return err
 	}
 	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
 	if err != nil {
 		return err
 	}
-	return handler.Restart(ctx, resourceToRestart)
+	if restartArgs.all {
+		args = []string{"all"}
+	}
+	return handler.Restart(ctx, args[0])
 }
 
 func validateResourceNameRef(resourceName string, ws *userworkspace.Workspace) error {

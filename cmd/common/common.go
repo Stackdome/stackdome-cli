@@ -56,3 +56,17 @@ func UserWorkspace(voyagerFilePath string) (*userworkspace.Workspace, error) {
 	}
 	return userworkspace.Unmarshal(voyagerFilePath)
 }
+
+func ValidateResourceNameRef(args []string, ws *userworkspace.Workspace, allowAllFlag bool) error {
+	if allowAllFlag {
+		return nil
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("no resource specfied.")
+	}
+	resourceName := args[0]
+	if _, found := ws.Resources[resourceName]; !found {
+		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
+	}
+	return nil
+}
