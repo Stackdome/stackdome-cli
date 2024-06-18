@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
+	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/mapper"
 	"github.com/ashishmax31/voyager-cli/pkg/process"
+	"github.com/ashishmax31/voyager-cli/pkg/tools"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -20,18 +22,33 @@ import (
 )
 
 func (w *WorkspaceHandler) Init(ctx context.Context) error {
+	configDir, err := w.session.Config().ConfigDir()
+	if err != nil {
+		return err
+	}
+
+	publicKeyPath, privateKeyPath, err := tools.EnsureSSHKeyPair(configDir)
+	w.session.Config().SetUserPrivateKeyPublicKeyPath(privateKeyPath, publicKeyPath)
+	if err := config.Save(w.session.Config()); err != nil {
+		return err
+	}
+
+	userPublicKeyEncoded, err := tools.Base64EncodedFile(publicKeyPath)
+	if err != nil {
+		return err
+	}
 	workspaceStorage := mapper.MapVoyagerFileToWorkspaceStorage(
 		w.userdefinedWorkspace,
 		w.session.Config().Username,
 		w.session.Config().ProviderConfig.Namespace,
+		userPublicKeyEncoded,
 	)
+
 	if err := w.ensureWorkspaceStorage(ctx, &workspaceStorage); err != nil {
 		return err
 	}
-	ctx, cancelFn := context.WithTimeout(ctx, time.Minute)
-	defer cancelFn()
 	existingWS := &workspacev1alpha1.WorkspaceStorage{}
-	err := wait.PollUntilContextCancel(ctx, time.Second*10, true, func(ctx context.Context) (done bool, err error) {
+	err = wait.PollUntilContextTimeout(ctx, time.Second*10, time.Minute, true, func(ctx context.Context) (done bool, err error) {
 		fmt.Println("Waiting for workspace storage to be ready...")
 		getErr := w.session.GetResourceFromProvider(
 			ctx,

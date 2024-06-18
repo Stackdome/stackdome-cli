@@ -34,8 +34,9 @@ const (
 )
 
 const (
-	SERVICE_TARGET = "service"
-	POD_TARGET     = "pod"
+	SERVICE_TARGET       = "service"
+	POD_TARGET           = "pod"
+	STORAGE_POD_SSH_USER = "stackdomeuser"
 )
 
 type portForwardTarget struct {
@@ -88,7 +89,7 @@ func (k *k8sProvider) SetupSSHTunnel(ctx context.Context, localPort int, target 
 }
 
 func (k *k8sProvider) SSHUser() string {
-	return k.cfg.ProviderConfig.SSHUserName
+	return STORAGE_POD_SSH_USER
 }
 
 func (k *k8sProvider) Execute(ctx context.Context, target provider.Target, cmd []string, interactive bool) error {

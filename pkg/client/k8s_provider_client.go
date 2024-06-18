@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/base64"
 	"fmt"
 
 	"github.com/ashishmax31/voyager-cli/pkg/config"
@@ -25,7 +26,11 @@ func NewProviderClient(cfg *config.Config) (*ProviderClient, error) {
 	}
 
 	// Validate CA cert.
-	_, err := certutil.NewPoolFromBytes(cfg.ProviderConfig.CaCert)
+	caCertBytes, err := base64.StdEncoding.DecodeString(cfg.ProviderConfig.CaCert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to base64 decode CA cert string: %w", err)
+	}
+	_, err = certutil.NewPoolFromBytes(caCertBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +39,7 @@ func NewProviderClient(cfg *config.Config) (*ProviderClient, error) {
 		Host:        cfg.ProviderConfig.ServerUrl,
 		BearerToken: cfg.ProviderConfig.Token,
 		TLSClientConfig: rest.TLSClientConfig{
-			CAData: cfg.ProviderConfig.CaCert,
+			CAData: caCertBytes,
 		},
 	}
 	scheme := runtime.NewScheme()

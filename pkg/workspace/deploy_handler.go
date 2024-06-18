@@ -24,6 +24,8 @@ func (w *WorkspaceHandler) Deploy(ctx context.Context) error {
 			w.userdefinedWorkspace,
 			w.session.Config().Username,
 			w.session.Config().ProviderConfig.Namespace,
+			w.session.Config().Organisation,
+			w.session.Config().ProviderConfig.WorkspaceDomain,
 		)
 		existingWS, present, err := w.getWorkspace(ctx, desiredWS)
 		if err != nil {
@@ -68,8 +70,6 @@ func (w *WorkspaceHandler) copyBuildSourceHash(existingWS, desiredWS *workspacev
 		}
 	}
 }
-
-
 
 func (w *WorkspaceHandler) setBuildHashForResources(desiredWS *workspacev1alpha1.Workspace) {
 	for i := range desiredWS.Spec.Resources {

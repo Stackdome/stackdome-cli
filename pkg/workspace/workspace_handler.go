@@ -51,11 +51,11 @@ func (w *WorkspaceHandler) getWorkspace(ctx context.Context, ws *workspacev1alph
 	return existing, true, nil
 }
 
-func (w *WorkspaceHandler) getWorkspaceStorage(ctx context.Context, desiredWStorage *workspacev1alpha1.WorkspaceStorage) (*workspacev1alpha1.WorkspaceStorage, bool, error) {
+func (w *WorkspaceHandler) getWorkspaceStorage(ctx context.Context, desiredWStorageName, desiredWStorageNamespace string) (*workspacev1alpha1.WorkspaceStorage, bool, error) {
 	existingWStorage := &workspacev1alpha1.WorkspaceStorage{}
 	if err := w.session.GetResourceFromProvider(
 		ctx,
-		types.NamespacedName{Name: desiredWStorage.Name, Namespace: desiredWStorage.Namespace},
+		types.NamespacedName{Name: desiredWStorageName, Namespace: desiredWStorageNamespace},
 		existingWStorage); err != nil {
 		return nil, false, err
 	}

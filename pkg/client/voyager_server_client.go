@@ -2,49 +2,130 @@ package client
 
 import (
 	"context"
-	"os"
-	"time"
+	"fmt"
 
-	"github.com/ashishmax31/voyager-cli/pkg/api/authentication"
-	"github.com/ashishmax31/voyager-cli/pkg/api/provider"
+	"github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	stackdomeapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	"github.com/ashishmax31/voyager-cli/pkg/api/stackdome"
 )
 
-type VoyagerServerClient interface {
-	GetUserInfo(ctx context.Context) (*authentication.AuthResponse, error)
-	InitializeProvider(ctx context.Context) (*provider.KubernetesProviderInfo, error)
+type StackdomeAPIError struct {
+	HttpCode int
+	err      error
+	Message  string
 }
 
-type vclient struct {
+func (e *StackdomeAPIError) Error() string {
+	return fmt.Sprintf("%s. Received '%d' code from stackdome API server: %s", e.Message, e.HttpCode, e.err.Error())
+}
+
+type StackdomeAPIClient interface {
+	GetUser(ctx context.Context) (*stackdome.User, error)
+	CreateWorskpaceProvisionRequest(ctx context.Context) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError)
+	GetWorskpaceProvisionRequest(ctx context.Context, id string) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError)
+	GetCurrentUserWorskpaceProvisionRequest(ctx context.Context) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError)
+}
+
+type stackdomeClient struct {
 	AccessToken string
 	URL         string
 	Insecure    bool
+	client      *stackdomeapi.APIClient
 }
 
-func NewVoyagerServerClient(token string, serverURL string, insecure bool) VoyagerServerClient {
-	return &vclient{AccessToken: token, URL: serverURL, Insecure: insecure}
-}
-
-func (c *vclient) GetUserInfo(ctx context.Context) (*authentication.AuthResponse, error) {
-	// TODO: Talk to voyager server using the url and get the user info
-	return &authentication.AuthResponse{
-		Username:     "ashish",
-		Organisation: "voyager-labs-dev",
-		// 1 year
-		TokenValidTill: time.Now().Add(time.Hour * 24 * 365),
-	}, nil
-}
-
-func (c *vclient) InitializeProvider(ctx context.Context) (*provider.KubernetesProviderInfo, error) {
-	// TODO: Talk to voyager server using the url and get the user info
-	caCert, err := os.ReadFile("/Users/ashishanand/projects/skysync/voyager-cli/ca.crt")
-	if err != nil {
-		return nil, err
+func NewStackdomeClient(token string, serverURL string, insecure bool) StackdomeAPIClient {
+	cfg := stackdomeapi.Configuration{
+		UserAgent: "stackdome-cli",
+		Debug:     true,
+		Servers: stackdomeapi.ServerConfigurations{
+			stackdomeapi.ServerConfiguration{
+				URL: serverURL,
+			},
+		},
 	}
-	return &provider.KubernetesProviderInfo{
-		Namespace: "ashish-workspace",
-		Cacrt:     caCert,
-		Token:     `eyJhbGciOiJSUzI1NiIsImtpZCI6IldFX2ZDMVNrVzVCeTUzUGkwMHNGbGF6d3c0b2hNZWtWb3FkNWdEb0hMTUUifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJhc2hpc2gtd29ya3NwYWNlIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6ImFzaGlzaC1zZWNyZXQiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoiYXNoaXNoIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZXJ2aWNlLWFjY291bnQudWlkIjoiOTJlNmZlOTItNTY2MS00YjkxLThmZDYtZDBlMTQyZDEyNjI3Iiwic3ViIjoic3lzdGVtOnNlcnZpY2VhY2NvdW50OmFzaGlzaC13b3Jrc3BhY2U6YXNoaXNoIn0.izVkkrDnaE1VMMRSPttHsOnecqQly2wkDJzAuRPes34AItBQiXQNJU-NPOkpXnL4DymeID78qitOQmy5uNA8NOolpFXmC2u2YTeBPDjNf0qVy5L0-ORjxkOU2_WfigvxwH1NBmiLdBxP5-BmRbBNmP-Hk1xgzmnkOoQyAR1jC4tYj7-dXQsvoyqzRqGfID2kJjuGHWZXJOFfyGZiNrjWdRCCfFJfFiDWfsyzlIfOf98jF6hu29DxAPeDwiqWb3qV3PilMrVPpUX75FwN19k_wv-qkTDgGV4QMNuYzX2I5FdJCzm9bfzXEkQeBry6ZlSe7koAUciXKFe1cibylqNFRA`,
-		ServerUrl: "0.0.0.0:53266",
-		SSHUser:   "root",
+	return &stackdomeClient{AccessToken: token, URL: serverURL, Insecure: insecure, client: stackdomeapi.NewAPIClient(&cfg)}
+}
+
+func (c *stackdomeClient) GetUser(ctx context.Context) (*stackdome.User, error) {
+	// TODO: Talk to voyager server using the url and get the user info
+	resp, httpResp, err := c.client.DefaultApi.ApiV1UsersMeGet(c.withAuthenticatedCtx(ctx)).Execute()
+	if err != nil {
+		return nil, &StackdomeAPIError{HttpCode: httpResp.StatusCode, err: err, Message: "failed to get User information"}
+	}
+	return &stackdome.User{
+		Id:           resp.GetId(),
+		Name:         resp.GetName(),
+		Username:     resp.GetUsername(),
+		Email:        resp.GetEmail(),
+		Organisation: resp.GetOrganisation(),
+		Role:         resp.GetRole(),
 	}, nil
+}
+
+func (c *stackdomeClient) CreateWorskpaceProvisionRequest(ctx context.Context) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError) {
+	resp, httpResp, err := c.client.DefaultApi.
+		ApiV1WorkspaceProvisionRequestsPost(c.withAuthenticatedCtx(ctx)).
+		WorkspaceProvisionRequest(*stackdomeapi.NewWorkspaceProvisionRequest("test")).
+		Execute()
+	if err != nil {
+		return nil, &StackdomeAPIError{HttpCode: httpResp.StatusCode, err: err, Message: "failed to create workspace provision request"}
+	}
+	return c.populateProvisionRequest(resp), nil
+}
+
+func (c *stackdomeClient) GetWorskpaceProvisionRequest(ctx context.Context, id string) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError) {
+	resp, httpResp, err := c.client.DefaultApi.
+		ApiV1WorkspaceProvisionRequestsIdGet(c.withAuthenticatedCtx(ctx), id).Execute()
+	if err != nil {
+		return nil, &StackdomeAPIError{HttpCode: httpResp.StatusCode, err: err, Message: "failed to get workspace provision request"}
+	}
+	return c.populateProvisionRequest(resp), nil
+}
+
+func (c *stackdomeClient) GetCurrentUserWorskpaceProvisionRequest(ctx context.Context) (*stackdome.WorkspaceProvisionRequest, *StackdomeAPIError) {
+	resp, httpResp, err := c.client.DefaultApi.
+		ApiV1WorkspaceProvisionRequestsCurrentGet(c.withAuthenticatedCtx(ctx)).Execute()
+	if err != nil {
+		return nil, &StackdomeAPIError{HttpCode: httpResp.StatusCode, err: err, Message: "failed to get workspace provision request"}
+	}
+	return c.populateProvisionRequest(resp), nil
+}
+
+func (c *stackdomeClient) withAuthenticatedCtx(ctx context.Context) context.Context {
+	return context.WithValue(ctx, openapi.ContextAccessToken, c.AccessToken)
+}
+
+func (c *stackdomeClient) populateProvisionRequest(apiResp *stackdomeapi.WorkspaceProvisionRequest) *stackdome.WorkspaceProvisionRequest {
+	res := &stackdome.WorkspaceProvisionRequest{
+		Id:      apiResp.GetId(),
+		State:   populateWPRState(apiResp.GetState()),
+		Message: apiResp.GetMessage(),
+	}
+
+	respStatus, ok := apiResp.GetStatusOk()
+	if ok {
+		res.Status = &stackdome.WorkspaceProvisionRequestStatus{
+			WorkspaceNamespace:           respStatus.GetWorkspaceNamespace(),
+			ClusterCaCert:                respStatus.GetClusterCaCert(),
+			ClusterUrl:                   respStatus.GetClusterUrl(),
+			WorkspaceServiceAccountname:  respStatus.GetWorkspaceServiceAccountname(),
+			WorkspaceServiceaccountToken: respStatus.GetWorkspaceServiceaccountToken(),
+			Domain:                       respStatus.GetDomain(),
+		}
+	}
+
+	return res
+}
+
+func populateWPRState(in stackdomeapi.WorkspaceProvisionRequestState) stackdome.WorkspaceProvisionRequestState {
+	switch in {
+	case stackdomeapi.COMPLETED:
+		return stackdome.WorkspaceProvisionRequestStateCompleted
+	case stackdomeapi.PENDING:
+		return stackdome.WorkspaceProvisionRequestStatePending
+	case stackdomeapi.ERROR:
+		return stackdome.WorkspaceProvisionRequestStateError
+	default:
+		return stackdome.WorkspaceProvisionRequestStatePending
+	}
 }

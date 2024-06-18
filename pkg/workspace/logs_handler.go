@@ -14,6 +14,8 @@ func (w *WorkspaceHandler) GetLogs(ctx context.Context, resourceRef string, foll
 		w.userdefinedWorkspace,
 		w.session.Config().Username,
 		w.session.Config().ProviderConfig.Namespace,
+		w.session.Config().Organisation,
+		w.session.Config().ProviderConfig.WorkspaceDomain,
 	)
 	existingWS, WSpresent, WsErr := w.getWorkspace(ctx, desiredWS)
 	if WsErr != nil {

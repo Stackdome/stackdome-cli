@@ -27,6 +27,8 @@ func (w *WorkspaceHandler) Build(ctx context.Context, resourceName string) error
 			w.userdefinedWorkspace,
 			w.session.Config().Username,
 			w.session.Config().ProviderConfig.Namespace,
+			w.session.Config().Organisation,
+			w.session.Config().ProviderConfig.WorkspaceDomain,
 		)
 		existingWS, present, err := w.getWorkspace(ctx, desiredWS)
 		if err != nil {

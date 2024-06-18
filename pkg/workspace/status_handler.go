@@ -18,14 +18,11 @@ func (w *WorkspaceHandler) Status(ctx context.Context, resourceName string) (*us
 		w.userdefinedWorkspace,
 		w.session.Config().Username,
 		w.session.Config().ProviderConfig.Namespace,
-	)
-	desiredWStorage := mapper.MapVoyagerFileToWorkspaceStorage(
-		w.userdefinedWorkspace,
-		w.session.Config().Username,
-		w.session.Config().ProviderConfig.Namespace,
+		w.session.Config().Organisation,
+		w.session.Config().ProviderConfig.WorkspaceDomain,
 	)
 	existingWS, WSpresent, WsErr := w.getWorkspace(ctx, desiredWS)
-	existingWStorage, WstoragePresent, WstorageErr := w.getWorkspaceStorage(ctx, &desiredWStorage)
+	existingWStorage, WstoragePresent, WstorageErr := w.getWorkspaceStorage(ctx, mapper.WorkspaceStorageName(w.session.Config().Username), w.session.Config().ProviderConfig.Namespace)
 
 	switch {
 	case WstorageErr != nil:

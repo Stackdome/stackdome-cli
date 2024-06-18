@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"time"
 )
 
 type Config struct {
@@ -16,9 +15,9 @@ type Config struct {
 	ProviderConfig     *ComputeProviderConfig `json:"providerConfig"`
 	Username           string                 `json:"username,omitempty" doc:"User name."`
 	Organisation       string                 `json:"organisation"`
-	TokenValidity      time.Time
-	UserPrivateKeyPath string          `json:"userPrivateKeyPath"`
-	SyncDaemonInfo     *SyncDaemonInfo `json:"SyncDaemonInfo"`
+	UserPublicKeyPath  string                 `json:"userPublicKeyPath"`
+	UserPrivateKeyPath string                 `json:"userPrivateKeyPath"`
+	SyncDaemonInfo     *SyncDaemonInfo        `json:"SyncDaemonInfo"`
 }
 
 type SyncDaemonInfo struct {
@@ -30,9 +29,10 @@ type ComputeProviderConfig struct {
 	ServiceAccountName string `json:"serviceAccountName"`
 	Namespace          string `json:"namespace"`
 	Token              string `json:"token"`
-	CaCert             []byte `json:"caCert"`
+	CaCert             string `json:"caCert"`
 	ServerUrl          string `json:"serverUrl"`
-	SSHUserName        string `json:"SSHUserName"`
+	SSHUserName        string `json:"sshUserName"`
+	WorkspaceDomain    string `json:"workspaceDomain"`
 }
 
 func notNull(attr any) bool {
@@ -61,21 +61,29 @@ func (c *Config) Valid() bool {
 	return true
 }
 
-func ConfigLocation() (string, error) {
-	if ocmconfig := os.Getenv("VOYAGER_CONFIG"); ocmconfig != "" {
-		return ocmconfig, nil
-	}
-	currentUser, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-	// Get the user's home directory
-	configDir := currentUser.HomeDir
-	path := filepath.Join(configDir, "/.voyager/config.json")
-	return path, nil
+func (c *Config) SetUserPrivateKeyPublicKeyPath(privateKeyPath string, publicKeyPath string) {
+	c.UserPrivateKeyPath = privateKeyPath
+	c.UserPublicKeyPath = publicKeyPath
 }
 
 func (c *Config) ConfigDir() (string, error) {
+	return ConfigDir()
+}
+
+func ConfigLocation() (string, error) {
+	if voyagerConfig := os.Getenv("VOYAGER_CONFIG"); voyagerConfig != "" {
+		return voyagerConfig, nil
+	}
+	configDir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(configDir, "config.json")
+	return path, nil
+}
+
+func ConfigDir() (string, error) {
 	currentUser, err := user.Current()
 	if err != nil {
 		return "", err

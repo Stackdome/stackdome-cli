@@ -18,7 +18,7 @@ func WorkspaceStorageName(username string) string {
 
 const DefaultSize = "2Gi"
 
-func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, namespace string) workspacev1alpha1.WorkspaceStorage {
+func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, namespace string, publicKeyEncoded string) workspacev1alpha1.WorkspaceStorage {
 	resourceStorageSpecList := make([]workspacev1alpha1.ResourceStorageSpec, 0)
 	for volumeName, spec := range in.Volumes {
 		currSpec := workspacev1alpha1.ResourceStorageSpec{
@@ -47,12 +47,13 @@ func MapVoyagerFileToWorkspaceStorage(in voyagerfile.Workspace, user string, nam
 		},
 		Spec: workspacev1alpha1.WorkspaceStorageSpec{
 			ResourceStorageSpecs: resourceStorageSpecList,
+			UserPublicSSHKey:     publicKeyEncoded,
 		},
 	}
 	return ws
 }
 
-func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username string, namespace string) *workspacev1alpha1.Workspace {
+func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username, namespace, organisation, domain string) *workspacev1alpha1.Workspace {
 	resourceSpecList := make([]workspacev1alpha1.ResourceSpec, 0)
 	for resourceName, userSpec := range in.Resources {
 		currResourceSpec := workspacev1alpha1.ResourceSpec{
@@ -91,7 +92,8 @@ func MapVoyagerFileToWorkspaceCR(in voyagerfile.Workspace, username string, name
 		Spec: workspacev1alpha1.WorkspaceSpec{
 			Resources:    resourceSpecList,
 			UserName:     username,
-			Organisation: "",
+			Organisation: organisation,
+			Domain:       domain,
 		},
 	}
 	return &ws

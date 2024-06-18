@@ -1,11 +1,20 @@
 package tools
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/sirupsen/logrus"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type SSHConfig struct {
@@ -85,4 +94,66 @@ func EnsureVoyagerSshConfig(sshConfigPath, voyagerConfigPath string, config *SSH
 		return fmt.Errorf("failed to update ssh config file: %v", err)
 	}
 	return nil
+}
+
+func EnsureSSHKeyPair(directory string) (publicKeyPath string, privateKeyPath string, err error) {
+	// Check if the directory exists, create it if necessary
+	err = os.MkdirAll(directory, 0700)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create directory: %v", err)
+	}
+
+	// Set the file paths for the private and public keys
+	privateKeyPath = filepath.Join(directory, "id_rsa")
+	publicKeyPath = filepath.Join(directory, "id_rsa.pub")
+
+	// Check if the private key already exists
+	if _, err = os.Stat(privateKeyPath); err == nil {
+		logrus.Debugf("SSH key pair already exists at %s\n", directory)
+		return publicKeyPath, privateKeyPath, nil
+	}
+
+	// Generate a new private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate private key: %v", err)
+	}
+
+	// Encode the private key in PEM format
+	privateKeyPEM := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	}
+
+	// Write the private key to a file with secure permissions
+	err = os.WriteFile(privateKeyPath, pem.EncodeToMemory(privateKeyPEM), 0600)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to write private key file: %v", err)
+	}
+
+	// Generate the public key
+	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate public key: %v", err)
+	}
+
+	// Encode the public key in the authorized_keys format
+	publicKeyBytes := ssh.MarshalAuthorizedKey(publicKey)
+
+	// Write the public key to a file with secure permissions
+	err = os.WriteFile(publicKeyPath, publicKeyBytes, 0644)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to write public key file: %v", err)
+	}
+
+	logrus.Debugf("SSH key pair generated successfully at %s\n", directory)
+	return publicKeyPath, privateKeyPath, nil
+}
+
+func Base64EncodedFile(filePath string) (string, error) {
+	fileBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(fileBytes), nil
 }
