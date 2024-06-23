@@ -61,7 +61,7 @@ func ValidateResourceNameRef(args []string, ws *userworkspace.Workspace, allowAl
 	if allowAllFlag {
 		return nil
 	}
-	if len(args) != 1 {
+	if len(args) == 0 {
 		return fmt.Errorf("no resource specfied.")
 	}
 	resourceName := args[0]

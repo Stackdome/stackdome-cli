@@ -85,7 +85,7 @@ func NewK8sProvider(cfg *config.Config, client client.ProviderClient) provider.P
 
 func (k *k8sProvider) SetupSSHTunnel(ctx context.Context, localPort int, target provider.Target) (chan struct{}, error) {
 	logrus.Debug("in setupSSHTunnel")
-	return k.SetupPortForward(ctx, localPort, 22, target)
+	return k.SetupPortForward(ctx, localPort, 2222, target)
 }
 
 func (k *k8sProvider) SSHUser() string {
@@ -212,19 +212,25 @@ func (k *k8sProvider) StreamLogs(ctx context.Context, targets []provider.Target,
 func (k *k8sProvider) SetupPortForward(ctx context.Context, localPort int, targetPort int, target provider.Target) (chan struct{}, error) {
 	stopChan := make(chan struct{})
 	portForwardExitChan := make(chan struct{})
-	go k.runPortforwarder(ctx, localPort, targetPort, target, stopChan, portForwardExitChan)
+	portForwardReadyChan := make(chan struct{})
+	go k.runPortforwarder(ctx, localPort, targetPort, target, stopChan, portForwardExitChan, portForwardReadyChan)
 	go func() {
 		<-ctx.Done()
 		close(stopChan)
 	}()
+	// Wait for portforward session to complete.
+	logrus.Debugf("waiting for portforward session to become ready")
+	// TODO: Use Context with timeout so that we dont wait indefinitely.
+	<-portForwardReadyChan
 	return portForwardExitChan, nil
 }
 
-func (k *k8sProvider) runPortforwarder(ctx context.Context, localport int, targetPort int, target provider.Target, stopChan, exitChan chan struct{}) {
+func (k *k8sProvider) runPortforwarder(ctx context.Context, localport int, targetPort int, target provider.Target, stopChan, exitChan, initialReadyChan chan struct{}) {
 	defer close(exitChan)
 	defer logrus.Info("portforward session stopped")
+	var currentReadyChan chan struct{}
+	currentReadyChan = initialReadyChan
 	for attempt := 1; attempt <= MaxRetryOnConnectionLoss; attempt++ {
-		currentReadyChan := make(chan struct{})
 		pf, err := k.newPortForwarder(ctx, localport, targetPort, target, stopChan, currentReadyChan)
 		if err != nil {
 			logrus.Errorf("failed to create portforwarder: %s", err.Error())
@@ -233,6 +239,8 @@ func (k *k8sProvider) runPortforwarder(ctx context.Context, localport int, targe
 		if err := pf.ForwardPorts(); err != nil {
 			if err == portforward.ErrLostConnectionToPod {
 				logrus.Warnf("lost connection to pod... retrying to establish connection, attempt: %d", attempt)
+				// Set the current ready chan to a new instance.
+				currentReadyChan = make(chan struct{})
 				continue
 			} else {
 				logrus.Errorf("portforward session errored: %s", err.Error())
