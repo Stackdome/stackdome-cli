@@ -6,13 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
+	"github.com/ashishmax31/voyager-cli/pkg/api/v1alpha1"
+	"github.com/ashishmax31/voyager-cli/pkg/tools"
+	"github.com/ashishmax31/voyager-cli/pkg/validation"
 )
 
 const (
-	VoyagerFilePathFlag     = "voyagerfile-path"
-	AllResourcesFlag        = "all"
-	InteractiveSessionFlage = "interactive"
+	VoyagerFilePathFlag    = "voyagerfile-path"
+	AllResourcesFlag       = "all"
+	InteractiveSessionFlag = "interactive"
 )
 
 func findVoyagerFile(dir string) (string, error) {
@@ -32,7 +34,7 @@ func findVoyagerFile(dir string) (string, error) {
 	return "", fmt.Errorf("cant locate voyagerfile in directory: %s", dir)
 }
 
-func UserWorkspace(voyagerFilePath string) (*userworkspace.Workspace, error) {
+func CurrentWorkspaceDefinition(voyagerFilePath string) (*v1alpha1.Workspace, error) {
 	if len(voyagerFilePath) == 0 {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -51,22 +53,13 @@ func UserWorkspace(voyagerFilePath string) (*userworkspace.Workspace, error) {
 		return nil, fmt.Errorf("failed to stat voyagerfile at %s: %w", voyagerFilePath, err)
 	}
 
-	if err := userworkspace.Validate(voyagerFilePath); err != nil {
+	if err := validation.Validate(voyagerFilePath); err != nil {
 		return nil, fmt.Errorf("invalid voyagerfile: %w", err)
 	}
-	return userworkspace.Unmarshal(voyagerFilePath)
-}
 
-func ValidateResourceNameRef(args []string, ws *userworkspace.Workspace, allowAllFlag bool) error {
-	if allowAllFlag {
-		return nil
+	res := &v1alpha1.Workspace{}
+	if err := tools.UnmarshalYamlFile(voyagerFilePath, res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal voyagerfile: %w", err)
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("no resource specfied.")
-	}
-	resourceName := args[0]
-	if _, found := ws.Resources[resourceName]; !found {
-		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
-	}
-	return nil
+	return res, nil
 }

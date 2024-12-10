@@ -7,14 +7,13 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
 var buildArgs struct {
-	voyagerFilePath string
-	all             bool
+	stackFilePath string
+	all           bool
 }
 
 func NewBuildCommand() *cobra.Command {
@@ -31,38 +30,32 @@ func NewBuildCommand() *cobra.Command {
 		Args: cobra.RangeArgs(0, 1),
 	}
 	buildCmd.Flags().BoolVarP(&buildArgs.all, "all", "a", false, "-a or --all")
-	buildCmd.Flags().StringVar(&buildArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
+	buildCmd.Flags().StringVar(&buildArgs.stackFilePath, common.VoyagerFilePathFlag, "./voyagerfile.yaml", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return buildCmd
 }
 
 func build(ctx context.Context, args []string) error {
-	userWorkspace, err := common.UserWorkspace(buildArgs.voyagerFilePath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	// Provider initialized.
-	currSession, err := session.NewSession(cfg, true)
-	if err != nil {
-		return err
+	if len(args) == 0 && !buildArgs.all {
+		return fmt.Errorf("atleast one argument is required or pass --all flag")
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
+	if len(args) == 0 {
+		args = append(args, "")
 	}
 
-	if err := common.ValidateResourceNameRef(args, userWorkspace, buildArgs.all); err != nil {
-		return err
-	}
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	runtime, err := config.NewRuntime("build", config.Args{
+		StackFilePath: &buildArgs.stackFilePath,
+		AllResources:  &buildArgs.all,
+		ResourceName:  &args[0],
+	})
+
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
-	if buildArgs.all {
-		args = []string{"all"}
+
+	handler, err := workspace.NewWorkspaceHandler(runtime)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
-	return handler.Build(ctx, args[0])
+	return handler.Build(ctx, runtime)
 }

@@ -9,7 +9,9 @@ import (
 type Syncer interface {
 	SetupSyncSession(context.Context, SourceDestintionList, provider.Target) error
 	StopSyncSession(context.Context) error
-	Sync(context.Context) error
+	ForceSync(context.Context) error
 	Initialized(context.Context) (bool, error)
+	SyncSessionRunning(context.Context) (bool, error)
+	SyncSessionRunningFlagPath() string
 	Status(context.Context) error
 }

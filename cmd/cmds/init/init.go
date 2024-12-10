@@ -5,61 +5,56 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
+
 	"github.com/spf13/cobra"
 )
 
 var initArgs struct {
-	voyagerFilePath string
+	workspaceName string
 }
 
 // initCmd represents the init command
 func NewInitCommand() *cobra.Command {
 	var initCmd = &cobra.Command{
 		Use:   "init",
-		Short: "Initialize your voyager workspace environment",
-		Long:  `Initialize your voyager workspace environment`,
+		Short: "Initialize workspace environment",
+		Long:  `Initialize workspace environment`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := run(); err != nil {
-				fmt.Printf("stackdome init error: %s \n", err.Error())
+				fmt.Printf("init error: %s \n", err.Error())
 				os.Exit(1)
 			}
 		},
 		Args: cobra.NoArgs,
 	}
-	initCmd.Flags().StringVar(&initArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
+	// Required flag workspace-name
+	initCmd.Flags().StringVar(&initArgs.workspaceName, "workspace-name", "", "workspace name")
 	return initCmd
 }
 
 func run() error {
-	userWorkspace, err := common.UserWorkspace(initArgs.voyagerFilePath)
-	if err != nil {
-		return err
-	}
-	if err := userWorkspace.Process(); err != nil {
-		return err
+	if initArgs.workspaceName == "" {
+		return fmt.Errorf("workspace name is required")
 	}
 
-	cfg, err := config.Load()
+	runtime, err := config.NewRuntime("init", config.Args{
+		WorkspaceName: &initArgs.workspaceName,
+	})
+
 	if err != nil {
-		return err
-	}
-	session, err := session.NewSession(cfg, false)
-	if err != nil {
-		return err
-	}
-	err = session.InitializeProvider(context.Background())
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
-	handler, err := workspace.NewWorkspaceStorageHandler(session, *userWorkspace)
+	handler, err := workspace.NewWorkspaceHandler(runtime)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
-	return handler.Init(context.Background())
+	if err := handler.Initialize(context.Background(), initArgs.workspaceName); err != nil {
+		return fmt.Errorf("failed to initialize workspace: %w", err)
+	}
+
+	return nil
 }

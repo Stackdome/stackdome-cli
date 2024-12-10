@@ -1,11 +1,10 @@
 package tools
 
 import (
-	"fmt"
-	"log"
 	"sync/atomic"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 )
 
 type FileSystemWatcher interface {
@@ -70,18 +69,18 @@ func (w *fileSystemWatcher) StartWatch() error {
 	go func() {
 		defer func() {
 			w.exited.Store(true)
+			close(w.notifyChan)
 			watcher.Close()
 		}()
 		for {
 			select {
 			case event := <-watcher.Events:
-				fmt.Printf("event: %+v: expected: %s \n", event, w.cfg.fileName)
+				logrus.Debugf("event: %+v: filtering for: %s \n", event, w.cfg.fileName)
 				if w.matchesFilter(event) {
-					close(w.notifyChan)
 					return
 				}
 			case err := <-watcher.Errors:
-				log.Println("watch error:", err)
+				logrus.Errorf("watch error: %s", err.Error())
 			case <-w.stopChan:
 				return
 			}

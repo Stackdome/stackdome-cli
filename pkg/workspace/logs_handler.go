@@ -4,44 +4,54 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ashishmax31/voyager-cli/pkg/mapper"
+	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/provider"
 	"github.com/ashishmax31/voyager-cli/pkg/provider/k8s"
 )
 
-func (w *WorkspaceHandler) GetLogs(ctx context.Context, resourceRef string, follow bool, tailLines int64) error {
-	desiredWS := mapper.MapVoyagerFileToWorkspaceCR(
-		w.userdefinedWorkspace,
-		w.session.Config().Username,
-		w.session.Config().ProviderConfig.Namespace,
-		w.session.Config().Organisation,
-		w.session.Config().ProviderConfig.WorkspaceDomain,
-	)
-	existingWS, WSpresent, WsErr := w.getWorkspace(ctx, desiredWS)
-	if WsErr != nil {
-		return WsErr
-	}
-	if !WSpresent {
-		return fmt.Errorf("workspace not yet deployed. Please run voyager deploy first.")
+func (w *workspaceHandler) GetLogs(ctx context.Context, runtime *config.Runtime) error {
+	currentWorkspaceName := runtime.Config().CurrentWorkspace
+	if currentWorkspaceName == nil {
+		return workspaceHandlerErr("current workspace is not set")
 	}
 
-	targets := make([]provider.Target, 0)
-	for _, resourceSpec := range existingWS.Spec.Resources {
-		if resourceRef == resourceSpec.Name || resourceRef == "all" {
-			WSresource, err := w.getWorkspaceResource(ctx, resourceSpec.Name)
-			if err != nil {
-				return err
+	currentWorkspace, serr := w.workspaceService.GetWorkspaceByName(
+		ctx,
+		*currentWorkspaceName,
+	)
+	if serr != nil {
+		return workspaceHandlerErr("failed to fetch current workspace '%s': %w", *currentWorkspaceName, serr)
+	}
+
+	logTargets := make([]provider.Target, 0)
+	if runtime.Args.IsAllResources() {
+		for _, resource := range currentWorkspace.Resources {
+			if resource.Status.IsAvailable() {
+				logTargets = append(logTargets, k8s.NewServiceTarget(*resource.Status.InternalServiceName))
+			} else {
+				fmt.Printf("skipping resource '%s' as its not available", resource.Name)
 			}
-			targets = append(targets, k8s.NewServiceTarget(*WSresource.Status.InternalAddress))
+		}
+		if len(logTargets) == 0 {
+			return workspaceHandlerErr("no resources available in workspace")
+		}
+	} else {
+		for _, resource := range currentWorkspace.Resources {
+			if resource.Name == runtime.Args.GetResourceName() {
+				if resource.Status.IsAvailable() {
+					logTargets = append(logTargets, k8s.NewServiceTarget(*resource.Status.InternalServiceName))
+				} else {
+					return workspaceHandlerErr("resource '%s' is not available", runtime.Args.GetResourceName())
+				}
+			}
+		}
+		if len(logTargets) == 0 {
+			return workspaceHandlerErr("resource '%s' not found in workspace", runtime.Args.GetResourceName())
 		}
 	}
 
-	logOptions := provider.LogOptions{}
-	if follow {
-		logOptions.Follow = true
-	} else {
-		logOptions.TailLines = tailLines
-	}
-
-	return w.provider.StreamLogs(ctx, targets, logOptions)
+	return w.provider.StreamLogs(ctx, logTargets, provider.LogOptions{
+		Follow:    runtime.Args.IsFollow(),
+		TailLines: runtime.Args.GetTailLines(),
+	})
 }

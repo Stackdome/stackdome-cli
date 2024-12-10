@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
+	"github.com/ashishmax31/voyager-cli/pkg/validation"
 	"github.com/spf13/cobra"
 )
 
@@ -35,9 +35,9 @@ func NewValidateCommand() *cobra.Command {
 
 func validateRun(cmd *cobra.Command, args []string) error {
 	voyagerfilePath := args[0]
-	err := userworkspace.Validate(voyagerfilePath)
+	err := validation.Validate(voyagerfilePath)
 	if err != nil {
-		return fmt.Errorf("failed to validate voyagerfile at '%s': %w\n", voyagerfilePath, err)
+		return fmt.Errorf("failed to validate voyagerfile at '%s': %w", voyagerfilePath, err)
 	}
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -13,20 +12,28 @@ import (
 	workspacev1alpha1 "soradev.io/cluster-agent/api/v1alpha1"
 )
 
+type providerConfig interface {
+	ProviderCACert() string
+	ProviderServerURL() string
+	ProviderToken() string
+	Valid() bool
+	SSHUser() string
+}
+
 type ProviderClient struct {
-	config     *config.Config
+	config     providerConfig
 	scheme     *runtime.Scheme
 	RestConfig *rest.Config
 	client.Client
 }
 
-func NewProviderClient(cfg *config.Config) (*ProviderClient, error) {
+func NewProviderClient(cfg providerConfig) (*ProviderClient, error) {
 	if !cfg.Valid() {
 		return nil, fmt.Errorf("config not valid")
 	}
 
 	// Validate CA cert.
-	caCertBytes, err := base64.StdEncoding.DecodeString(cfg.ProviderConfig.CaCert)
+	caCertBytes, err := base64.StdEncoding.DecodeString(cfg.ProviderCACert())
 	if err != nil {
 		return nil, fmt.Errorf("failed to base64 decode CA cert string: %w", err)
 	}
@@ -36,8 +43,8 @@ func NewProviderClient(cfg *config.Config) (*ProviderClient, error) {
 	}
 
 	restConfig := &rest.Config{
-		Host:        cfg.ProviderConfig.ServerUrl,
-		BearerToken: cfg.ProviderConfig.Token,
+		Host:        cfg.ProviderServerURL(),
+		BearerToken: cfg.ProviderToken(),
 		TLSClientConfig: rest.TLSClientConfig{
 			CAData: caCertBytes,
 		},
@@ -64,4 +71,8 @@ func NewProviderClient(cfg *config.Config) (*ProviderClient, error) {
 		Client:     clientset,
 		RestConfig: restConfig,
 	}, nil
+}
+
+func (c *ProviderClient) SSHUser() string {
+	return c.config.SSHUser()
 }

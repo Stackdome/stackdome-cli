@@ -7,16 +7,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
 var execArgs struct {
-	interactive     bool
-	voyagerFilePath string
+	interactive bool
 }
 
 func NewExecCommand() *cobra.Command {
@@ -32,35 +29,26 @@ func NewExecCommand() *cobra.Command {
 		},
 	}
 	execCmd.Flags().BoolVarP(&execArgs.interactive, "i", "i", false, "-i or --i")
-	execCmd.Flags().StringVar(&execArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return execCmd
 }
 
 func exec(ctx context.Context, args []string) error {
-	userWorkspace, err := common.UserWorkspace(execArgs.voyagerFilePath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	// Provider initialized.
-	currSession, err := session.NewSession(cfg, true)
-	if err != nil {
-		return err
+	if len(args) < 2 {
+		return fmt.Errorf("missing required arguments.. usage: voyager exec <resource-name> <command>")
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
+	runtime, err := config.NewRuntime("exec", config.Args{
+		ResourceName: &args[0],
+		Interactive:  &execArgs.interactive,
+		ExecuteCmd:   args[1:],
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
-	if err := common.ValidateResourceNameRef(args, userWorkspace, false); err != nil {
-		return err
-	}
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	handler, err := workspace.NewWorkspaceHandler(runtime)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -71,7 +59,7 @@ func exec(ctx context.Context, args []string) error {
 		<-signalTermination
 		cancelFn()
 	}()
-	return ignoreCtxCancelledErr(handler.Execute(ctx, args[0], args[1:], execArgs.interactive))
+	return ignoreCtxCancelledErr(handler.Execute(ctx, runtime))
 }
 
 func ignoreCtxCancelledErr(err error) error {

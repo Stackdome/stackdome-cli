@@ -7,7 +7,6 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -30,27 +29,16 @@ func NewSyncStatusCommand() *cobra.Command {
 }
 
 func syncStatus() error {
-	userWorkspace, err := common.UserWorkspace(syncArgs.voyagerFilePath)
+	runtime, err := config.NewRuntime("sync", config.Args{
+		StackFilePath: &syncArgs.voyagerFilePath,
+	})
 	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
-	currSession, err := session.NewSession(cfg, true)
+	syncHandler, err := workspace.NewWorkspaceHandler(runtime)
 	if err != nil {
-		return err
-	}
-
-	if err := userWorkspace.Process(); err != nil {
-		return err
-	}
-
-	syncHandler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
 	return syncHandler.SyncStatus(context.Background())

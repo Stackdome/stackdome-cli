@@ -16,8 +16,6 @@ var args struct {
 	insecure         bool
 }
 
-// loginCmd represents the login command
-
 func NewLoginCommand() *cobra.Command {
 	var loginCmd = &cobra.Command{
 		Use:   "login",
@@ -47,16 +45,17 @@ func login() error {
 
 	cfg := config.New()
 	ctx := context.Background()
-	stackdomeClient := client.NewStackdomeClient(args.token, args.voyagerServerUrl, args.insecure)
+	cfg.AccessToken = args.token
+	cfg.VoyagerServerUrl = args.voyagerServerUrl
+	cfg.Insecure = args.insecure
+	stackdomeClient := client.NewStackdomeClient(cfg)
 	resp, err := stackdomeClient.GetUser(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate with voyager server: %w", err)
 	}
-	cfg.AccessToken = args.token
-	cfg.VoyagerServerUrl = args.voyagerServerUrl
-	cfg.Insecure = args.insecure
 	cfg.Username = resp.Name
 	cfg.Organisation = resp.Organisation
+	cfg.OrganisationID = resp.OrganisationID
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}

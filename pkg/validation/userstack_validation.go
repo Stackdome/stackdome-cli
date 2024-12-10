@@ -1,24 +1,23 @@
-package userworkspace
+package validation
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
+	"github.com/ashishmax31/voyager-cli/pkg/api/v1alpha1"
+	"github.com/ashishmax31/voyager-cli/pkg/tools"
+
 	"github.com/go-playground/validator"
-	"github.com/sirupsen/logrus"
 )
 
 func Validate(voyagerFilePath string) error {
-	workspace, err := Unmarshal(voyagerFilePath)
-	if err != nil {
-		return fmt.Errorf("error parsing YAML file: %v\n", err)
+	var workspace v1alpha1.UserStack
+
+	if err := tools.UnmarshalYamlFile(voyagerFilePath, &workspace); err != nil {
+		return fmt.Errorf("error reading YAML file: %v", err)
 	}
-	logrus.Debugf("workspace: %+v \n", workspace)
-	for name, resource := range workspace.Resources {
-		logrus.Debugf("name: %s, resource: %+v \n", name, *resource)
-	}
+
 	validate := validator.New()
 	definedVolumeNames := []string{}
 	for volumeName := range workspace.Volumes {
@@ -28,7 +27,7 @@ func Validate(voyagerFilePath string) error {
 	for resource, resourceSpec := range workspace.Resources {
 		resourceSpec := *resourceSpec
 		if err := validate.Struct(resourceSpec); err != nil {
-			return fmt.Errorf("error validating YAML file, resource '%s': %v\n", resource, err)
+			return fmt.Errorf("error validating YAML file, resource '%s': %v", resource, err)
 		}
 		// Validate build spec
 		if resourceSpec.Build != nil && !slices.Contains(definedVolumeNames, resourceSpec.Build.SourceVolume) {
@@ -48,16 +47,11 @@ func Validate(voyagerFilePath string) error {
 			}
 		}
 		for _, envFile := range resourceSpec.EnvFiles {
-			if !fileExists(envFile) {
+			if !tools.FileExists(envFile) {
 				return fmt.Errorf("cant read env file for resource '%s' at: '%s'", resource, envFile)
 			}
 		}
 	}
 
 	return nil
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

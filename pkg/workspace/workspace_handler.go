@@ -4,73 +4,52 @@ import (
 	"context"
 	"fmt"
 
-	voyagerfile "github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
+	"github.com/ashishmax31/voyager-cli/pkg/client"
+	"github.com/ashishmax31/voyager-cli/pkg/config"
 	"github.com/ashishmax31/voyager-cli/pkg/provider"
 	"github.com/ashishmax31/voyager-cli/pkg/provider/k8s"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
+	"github.com/ashishmax31/voyager-cli/pkg/services"
 	"github.com/ashishmax31/voyager-cli/pkg/sync"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	workspacev1alpha1 "soradev.io/cluster-agent/api/v1alpha1"
 )
 
-type WorkspaceHandler struct {
-	session              session.Session
-	userdefinedWorkspace voyagerfile.Workspace
-	syncHandler          sync.Syncer
-	provider             provider.Provider
+type workspaceHandler struct {
+	runtime                        *config.Runtime
+	syncHandler                    sync.Syncer
+	provider                       provider.Provider
+	workspaceStorageService        services.WorkspaceStorageService
+	workspaceService               services.WorkspaceService
+	workspaceInitializationService services.WorkspaceInitializationService
 }
 
-func NewWorkspaceStorageHandler(session session.Session, userdefinedWorkspace voyagerfile.Workspace) (*WorkspaceHandler, error) {
-	configDir, err := session.Config().ConfigDir()
-	if err != nil {
-		return nil, err
+func NewWorkspaceHandler(runtime *config.Runtime) (*workspaceHandler, error) {
+	w := &workspaceHandler{
+		runtime: runtime,
+		workspaceStorageService: services.NewWorkspaceStorageService(services.WorkspaceStorageServiceSpec{
+			Session: runtime.Session,
+		}),
+		workspaceService: services.NewWorkspaceService(services.WorkspaceServiceSpec{
+			Session: runtime.Session,
+		}),
+		workspaceInitializationService: services.NewWorkspaceInitializationService(runtime),
 	}
 
-	provider := k8s.NewK8sProvider(session.Config(), *session.ProviderClient())
-	w := &WorkspaceHandler{
-		session:              session,
-		userdefinedWorkspace: userdefinedWorkspace,
-		provider:             provider,
-		syncHandler:          sync.NewMutagenSyncer(session.Config(), configDir, "/Users/ashishanand/.voyager/bin", provider),
+	if runtime.Config().ProviderConfigPresent() {
+		providerClient, err := client.NewProviderClient(runtime.Config())
+		if err != nil {
+			return nil, workspaceHandlerErr("failed to create provider client: %w", err)
+		}
+		provider := k8s.NewK8sProvider(runtime.Config(), providerClient)
+		w.provider = provider
+		w.syncHandler = sync.NewMutagenSyncer(runtime.Config(), runtime.ConfigDir, runtime.DepsDir, provider)
 	}
 	return w, nil
 }
 
-func (w *WorkspaceHandler) getWorkspace(ctx context.Context, ws *workspacev1alpha1.Workspace) (*workspacev1alpha1.Workspace, bool, error) {
-	existing := &workspacev1alpha1.Workspace{}
-	if err := w.session.GetResourceFromProvider(ctx,
-		types.NamespacedName{Name: ws.Name, Namespace: ws.Namespace},
-		existing,
-	); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
+func (w *workspaceHandler) Initialize(ctx context.Context, workspaceName string) error {
+	if err := w.workspaceInitializationService.InitializeWorkspace(ctx, workspaceName); err != nil {
+		return workspaceHandlerErr("failed to initialize workspace: %w", err)
 	}
-	return existing, true, nil
-}
-
-func (w *WorkspaceHandler) getWorkspaceStorage(ctx context.Context, desiredWStorageName, desiredWStorageNamespace string) (*workspacev1alpha1.WorkspaceStorage, bool, error) {
-	existingWStorage := &workspacev1alpha1.WorkspaceStorage{}
-	if err := w.session.GetResourceFromProvider(
-		ctx,
-		types.NamespacedName{Name: desiredWStorageName, Namespace: desiredWStorageNamespace},
-		existingWStorage); err != nil {
-		return nil, false, err
-	}
-	return existingWStorage, true, nil
-}
-
-func (w *WorkspaceHandler) getWorkspaceResource(ctx context.Context, resourceName string) (*workspacev1alpha1.WorkspaceResource, error) {
-	referencedResource := &workspacev1alpha1.WorkspaceResource{}
-	if err := w.session.GetResourceFromProvider(
-		ctx,
-		types.NamespacedName{Name: resourceName, Namespace: w.session.Config().ProviderConfig.Namespace},
-		referencedResource); err != nil {
-		return nil, err
-	}
-	return referencedResource, nil
+	return nil
 }
 
 func workspaceHandlerErr(errString string, args ...any) error {

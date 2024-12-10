@@ -6,18 +6,117 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+
+	"github.com/ashishmax31/voyager-cli/pkg/api/v1alpha1"
 )
 
+type providerConfigGetter interface {
+	GetServiceAccountName() string
+	GetServiceAccountToken() string
+	GetClusterCaCert() string
+	GetClusterUrl() string
+	GetProvisionedWorkspaces() []v1alpha1.ProvisionedWorkspace
+}
+
 type Config struct {
-	AccessToken        string                 `json:"accessToken,omitempty" doc:"Bearer access token."`
-	VoyagerServerUrl   string                 `json:"voyagerServerUrl"`
-	Insecure           bool                   `json:"insecure"`
-	ProviderConfig     *ComputeProviderConfig `json:"providerConfig"`
-	Username           string                 `json:"username,omitempty" doc:"User name."`
-	Organisation       string                 `json:"organisation"`
-	UserPublicKeyPath  string                 `json:"userPublicKeyPath"`
-	UserPrivateKeyPath string                 `json:"userPrivateKeyPath"`
-	SyncDaemonInfo     *SyncDaemonInfo        `json:"SyncDaemonInfo"`
+	AccessToken        string                          `json:"accessToken,omitempty" doc:"Bearer access token."`
+	VoyagerServerUrl   string                          `json:"voyagerServerUrl"`
+	Insecure           bool                            `json:"insecure"`
+	ProviderConfig     *ComputeProviderConfig          `json:"providerConfig"`
+	Username           string                          `json:"username,omitempty" doc:"User name."`
+	Organisation       string                          `json:"organisation"`
+	OrganisationID     string                          `json:"organisationID"`
+	UserPublicKeyPath  string                          `json:"userPublicKeyPath"`
+	UserPrivateKeyPath string                          `json:"userPrivateKeyPath"`
+	Workspaces         []v1alpha1.ProvisionedWorkspace `json:"workspaces"`
+	CurrentWorkspace   *string                         `json:"currentWorkspace,omitempty"`
+}
+
+func (c *Config) SSHUser() string {
+	if c.ProviderConfig.SSHUserName == "" {
+		return "stackdomeuser"
+	}
+	return c.ProviderConfig.SSHUserName
+}
+
+func (c *Config) ProviderConfigPresent() bool {
+	return c.ProviderConfig != nil &&
+		c.ProviderConfig.ServiceAccountName != "" &&
+		c.ProviderConfig.Token != "" &&
+		c.ProviderConfig.CaCert != "" &&
+		c.ProviderConfig.ServerUrl != ""
+}
+
+func (c *Config) GetServerURL() string {
+	return c.VoyagerServerUrl
+}
+
+func (c *Config) GetAccessToken() string {
+	return c.AccessToken
+}
+
+func (c *Config) GetInsecure() bool {
+	return c.Insecure
+}
+
+func (c *Config) GetOrganisationID() string {
+	return c.OrganisationID
+}
+
+func (c *Config) ProviderCACert() string {
+	return c.ProviderConfig.CaCert
+}
+
+func (c *Config) ProviderServerURL() string {
+	return c.ProviderConfig.ServerUrl
+}
+
+func (c *Config) ServiceAccountName() string {
+	return c.ProviderConfig.ServiceAccountName
+}
+
+func (c *Config) ProviderToken() string {
+	return c.ProviderConfig.Token
+}
+
+func (c *Config) PersistCurrentWorkspace(workspaceName string) error {
+	c.CurrentWorkspace = &workspaceName
+	if err := Save(c); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) PersistProviderConfig(input providerConfigGetter) error {
+	if c.ProviderConfig == nil {
+		c.ProviderConfig = &ComputeProviderConfig{}
+	}
+	c.ProviderConfig.CaCert = input.GetClusterCaCert()
+	c.ProviderConfig.ServerUrl = input.GetClusterUrl()
+	c.ProviderConfig.ServiceAccountName = input.GetServiceAccountName()
+	c.ProviderConfig.Token = input.GetServiceAccountToken()
+	c.Workspaces = input.GetProvisionedWorkspaces()
+	if err := Save(c); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) CurrentNamespace() string {
+	if c.CurrentWorkspace == nil {
+		panic("current workspace is nil")
+	}
+	for _, ws := range c.Workspaces {
+		if ws.WorkspaceName == *c.CurrentWorkspace {
+			return ws.Namespace
+		}
+	}
+	panic(fmt.Sprintf("current workspace %s not found in config", *c.CurrentWorkspace))
+}
+
+type Workspace struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 }
 
 type SyncDaemonInfo struct {
@@ -27,12 +126,10 @@ type SyncDaemonInfo struct {
 
 type ComputeProviderConfig struct {
 	ServiceAccountName string `json:"serviceAccountName"`
-	Namespace          string `json:"namespace"`
 	Token              string `json:"token"`
 	CaCert             string `json:"caCert"`
 	ServerUrl          string `json:"serverUrl"`
 	SSHUserName        string `json:"sshUserName"`
-	WorkspaceDomain    string `json:"workspaceDomain"`
 }
 
 func notNull(attr any) bool {
@@ -43,12 +140,18 @@ func notEmpty(attr string) bool {
 	return len(attr) != 0
 }
 
+func notEmptyList[T any](attr []T) bool {
+	return len(attr) != 0
+}
+
 func (c *Config) Valid() bool {
 	validations := []bool{
 		notEmpty(c.AccessToken),
 		notEmpty(c.VoyagerServerUrl),
 		notNull(c.ProviderConfig),
-		notEmpty(c.ProviderConfig.Namespace),
+		notEmpty(c.OrganisationID),
+		notEmptyList(c.Workspaces),
+		notNull(c.CurrentWorkspace),
 		len(c.ProviderConfig.CaCert) != 0,
 		notEmpty(c.ProviderConfig.Token),
 		notEmpty(c.ProviderConfig.ServerUrl),

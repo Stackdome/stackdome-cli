@@ -7,18 +7,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
 var logsArgs struct {
-	voyagerFilePath string
-	all             bool
-	tailLines       int64
-	follow          bool
+	all       bool
+	tailLines int64
+	follow    bool
 }
 
 func NewLogsCommand() *cobra.Command {
@@ -36,35 +33,32 @@ func NewLogsCommand() *cobra.Command {
 	logsCmd.Flags().BoolVarP(&logsArgs.all, "all", "a", false, "-a or --all")
 	logsCmd.Flags().BoolVarP(&logsArgs.follow, "follow", "f", false, "-f or --follow")
 	logsCmd.Flags().Int64VarP(&logsArgs.tailLines, "tail", "t", 100, "-t=10 or --tail=10")
-	logsCmd.Flags().StringVar(&logsArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return logsCmd
 }
 
 func logs(ctx context.Context, args []string) error {
-	userWorkspace, err := common.UserWorkspace(logsArgs.voyagerFilePath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	// Provider initialized.
-	currSession, err := session.NewSession(cfg, true)
-	if err != nil {
-		return err
+	if len(args) == 0 && !logsArgs.all {
+		return fmt.Errorf("atleast one argument is required or pass --all flag")
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
+	if len(args) == 0 {
+		args = append(args, "")
 	}
 
-	if err := common.ValidateResourceNameRef(args, userWorkspace, logsArgs.all); err != nil {
-		return err
-	}
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	runtime, err := config.NewRuntime("logs", config.Args{
+		ResourceName: &args[0],
+		AllResources: &logsArgs.all,
+		TailLines:    &logsArgs.tailLines,
+		Follow:       &logsArgs.follow,
+	})
+
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
+	}
+
+	handler, err := workspace.NewWorkspaceHandler(runtime)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
 	ctx, cancelFn := context.WithCancel(ctx)
@@ -75,11 +69,7 @@ func logs(ctx context.Context, args []string) error {
 		<-signalTermination
 		cancelFn()
 	}()
-
-	if logsArgs.all {
-		args = []string{"all"}
-	}
-	return ignoreCtxCancelledErr(handler.GetLogs(ctx, args[0], logsArgs.follow, logsArgs.tailLines))
+	return ignoreCtxCancelledErr(handler.GetLogs(ctx, runtime))
 }
 
 func ignoreCtxCancelledErr(err error) error {

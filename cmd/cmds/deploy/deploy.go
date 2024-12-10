@@ -6,7 +6,6 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -27,33 +26,22 @@ func NewDeployCommand() *cobra.Command {
 		},
 		Args: cobra.NoArgs,
 	}
-	deployCmd.Flags().StringVar(&deployArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
+	deployCmd.Flags().StringVar(&deployArgs.voyagerFilePath, common.VoyagerFilePathFlag, "./voyagerfile.yaml", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return deployCmd
 }
 
 func deploy(ctx context.Context) error {
-	userWorkspace, err := common.UserWorkspace(deployArgs.voyagerFilePath)
+	runtime, err := config.NewRuntime("deploy", config.Args{
+		StackFilePath: &deployArgs.voyagerFilePath,
+	})
 	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	// Provider initialized.
-	currSession, err := session.NewSession(cfg, true)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
-	}
-
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	handler, err := workspace.NewWorkspaceHandler(runtime)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
-	return handler.Deploy(ctx)
+	return handler.Deploy(ctx, runtime)
 }

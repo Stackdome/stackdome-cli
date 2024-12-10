@@ -3,52 +3,97 @@ package session
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"time"
 
-	"github.com/ashishmax31/voyager-cli/pkg/api/stackdome"
+	"github.com/ashishmax31/voyager-cli/pkg/api/v1alpha1"
 	"github.com/ashishmax31/voyager-cli/pkg/client"
-	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"k8s.io/apimachinery/pkg/util/wait"
 	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
-	workspacev1alpha1 "soradev.io/cluster-agent/api/v1alpha1"
 )
 
+type config interface {
+	GetServerURL() string
+	GetAccessToken() string
+	GetInsecure() bool
+	GetOrganisationID() string
+	ProviderCACert() string
+	ProviderServerURL() string
+	ProviderToken() string
+	Valid() bool
+	SSHUser() string
+}
+
+type SessionError struct {
+	HttpCode int
+	err      error
+	Message  string
+}
+
+func (e *SessionError) Error() string {
+	return fmt.Sprintf("session error: %s", e.err.Error())
+}
+
+func ToSessionErr(in *client.StackdomeAPIError) *SessionError {
+	if in == nil {
+		return nil
+	}
+	return &SessionError{
+		HttpCode: in.HttpCode,
+		err:      in,
+		Message:  in.Message,
+	}
+}
+
+func NewSessionError(err error) *SessionError {
+	return &SessionError{
+		err: err,
+	}
+}
+
 type session struct {
-	config          *config.Config
 	stackdomeClient client.StackdomeAPIClient
 	providerClient  *client.ProviderClient
 }
 
 type Session interface {
-	CreateResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.CreateOption) error
-	GetResourceFromProvider(ctx context.Context, key k8sclient.ObjectKey, obj k8sclient.Object, opts ...k8sclient.GetOption) error
-	UpdateResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.UpdateOption) error
-	DeleteResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.DeleteOption) error
-	GetWorkspaceVolumesFromProvider(ctx context.Context, wstorage *workspacev1alpha1.WorkspaceStorage) ([]workspacev1alpha1.WorkspaceVolume, error)
-	InitializeProvider(context.Context) error
+	// GetWorkspaceVolumesFromProvider(ctx context.Context, wstorage *workspacev1alpha1.WorkspaceStorage) ([]workspacev1alpha1.WorkspaceVolume, error)
+	GetCurrentUserWorkspaceStorages(ctx context.Context) ([]*v1alpha1.WorkspaceStorage, *SessionError)
+	GetWorkspaceStorage(ctx context.Context, id string) (*v1alpha1.WorkspaceStorage, *SessionError)
+	UpdateWorkspaceStorage(ctx context.Context, ID string, userStack *v1alpha1.UserStack) (*v1alpha1.WorkspaceStorage, *SessionError)
+	DeleteWorkspaceStorage(ctx context.Context, ID string) *SessionError
+	CreateWorkspaceStorage(ctx context.Context, userStack *v1alpha1.UserStack) (*v1alpha1.WorkspaceStorage, *SessionError)
+	MarkAsSynced(ctx context.Context, storageID string, volumeID string) *SessionError
+	GetCurrentWorskpaceUser(ctx context.Context) (*v1alpha1.WorkspaceUser, *SessionError)
+	CreateWorkspaceUser(ctx context.Context, desiredWorkspaceUser *v1alpha1.WorkspaceUser) (*v1alpha1.WorkspaceUser, *SessionError)
+	UpdateWorkspaceUser(ctx context.Context, ID string, workspaceUser *v1alpha1.WorkspaceUser) (*v1alpha1.WorkspaceUser, *SessionError)
+
+	CreateWorkspace(ctx context.Context, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError)
+	GetWorkspace(ctx context.Context, id string) (*v1alpha1.Workspace, *SessionError)
+	GetWorkspaceResources(ctx context.Context, id string) ([]v1alpha1.WorkspaceResource, *SessionError)
+	UpdateWorkspace(ctx context.Context, ID string, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError)
+	DeleteWorkspace(ctx context.Context, ID string) *SessionError
+	GetCurrentWorkspaces(ctx context.Context) ([]*v1alpha1.Workspace, *SessionError)
+
 	ProviderClient() *client.ProviderClient
-	Config() *config.Config
 }
 
-func NewSession(config *config.Config, withProvider bool) (Session, error) {
+func NewSession(config config, withProvider bool) (Session, error) {
+	if config.GetOrganisationID() == "" {
+		return nil, fmt.Errorf("organisation id missing, run 'stackdome login' ")
+	}
 	if withProvider {
 		if !config.Valid() {
-			return nil, fmt.Errorf("stackdome configfile is invalid! Run init first")
+			return nil, fmt.Errorf("stackdome configfile is invalid! Create a workspace environment first by running 'voyager create-workspace ...'")
 		}
 		providerClient, err := client.NewProviderClient(config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create provider client: %w", err)
 		}
 		return &session{
-			config:          config,
-			stackdomeClient: client.NewStackdomeClient(config.AccessToken, config.VoyagerServerUrl, false),
+			stackdomeClient: client.NewStackdomeClient(config),
 			providerClient:  providerClient,
 		}, nil
 	}
 	return &session{
-		config:          config,
-		stackdomeClient: client.NewStackdomeClient(config.AccessToken, config.VoyagerServerUrl, false),
+		stackdomeClient: client.NewStackdomeClient(config),
 	}, nil
 }
 
@@ -56,78 +101,124 @@ func (s *session) ProviderClient() *client.ProviderClient {
 	return s.providerClient
 }
 
-func (s *session) InitializeProvider(ctx context.Context) error {
-	err := s.ensureProvisionRequestExists(ctx)
+func (s *session) CreateWorkspace(ctx context.Context, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError) {
+	createdWorkspace, err := s.stackdomeClient.CreateWorkspace(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("failed to initialize provider: %w", err)
+		return nil, ToSessionErr(err)
 	}
-	provisionRequest, pErr := s.waitForWorkspaceProvisionRequestCompletion(ctx)
-	if pErr != nil {
-		return fmt.Errorf("failed to initialize provider: %w", pErr)
-	}
-
-	if err := s.populateAndSaveProviderConfig(provisionRequest); err != nil {
-		return fmt.Errorf("failed to initialize provider: %w", pErr)
-	}
-
-	providerClient, err := client.NewProviderClient(s.config)
-	if err != nil {
-		return fmt.Errorf("failed to initialize provider client: %w", err)
-	}
-	s.providerClient = providerClient
-	return nil
+	return createdWorkspace, nil
 }
 
-func (s *session) ensureProvisionRequestExists(ctx context.Context) error {
-	_, err := s.stackdomeClient.GetCurrentUserWorskpaceProvisionRequest(ctx)
+func (s *session) GetWorkspace(ctx context.Context, id string) (*v1alpha1.Workspace, *SessionError) {
+	workspace, err := s.stackdomeClient.GetWorkspace(ctx, id)
 	if err != nil {
-		if err.HttpCode == http.StatusNotFound {
-			return s.handleProvisionRequestCreation(ctx)
-		}
-		return err
+		return nil, ToSessionErr(err)
 	}
-	return nil
+	return workspace, nil
 }
 
-func (s *session) waitForWorkspaceProvisionRequestCompletion(ctx context.Context) (*stackdome.WorkspaceProvisionRequest, error) {
-	var currentRequest *stackdome.WorkspaceProvisionRequest
-	var perr *client.StackdomeAPIError
-
-	pollErr := wait.PollUntilContextTimeout(ctx, time.Second*5, time.Minute*1, true, func(ctx context.Context) (done bool, err error) {
-		currentRequest, perr = s.stackdomeClient.GetCurrentUserWorskpaceProvisionRequest(ctx)
-		if perr != nil {
-			return false, fmt.Errorf("failed to get current user's workspace provision request. Error: %w", perr)
-		}
-		if currentRequest.State == stackdome.WorkspaceProvisionRequestStateCompleted {
-			return true, nil
-		}
-		return false, nil
-	})
-
-	if pollErr != nil {
-		return nil, fmt.Errorf("failed to wait for workspace provision request completion. Error: %w", pollErr)
+func (s *session) GetWorkspaceResources(ctx context.Context, id string) ([]v1alpha1.WorkspaceResource, *SessionError) {
+	workspaceResources, serr := s.stackdomeClient.GetWorkspaceResources(ctx, id)
+	if serr != nil {
+		return nil, ToSessionErr(serr)
 	}
-
-	return currentRequest, nil
+	return workspaceResources, nil
 }
 
-func (s *session) handleProvisionRequestCreation(ctx context.Context) error {
-	_, err := s.stackdomeClient.CreateWorskpaceProvisionRequest(ctx)
+func (s *session) UpdateWorkspace(ctx context.Context, ID string, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError) {
+	updatedWorkspace, err := s.stackdomeClient.UpdateWorkspace(ctx, ID, workspace)
 	if err != nil {
-		return err
+		return nil, ToSessionErr(err)
+	}
+	return updatedWorkspace, nil
+}
+
+func (s *session) DeleteWorkspace(ctx context.Context, ID string) *SessionError {
+	err := s.stackdomeClient.DeleteWorkspace(ctx, ID)
+	if err != nil {
+		return ToSessionErr(err)
 	}
 	return nil
 }
 
-func (s *session) configValid() error {
-	if s.config == nil || len(s.config.AccessToken) == 0 || len(s.config.VoyagerServerUrl) == 0 {
-		return fmt.Errorf("access token and voyager server url is mandatory")
+func (s *session) GetCurrentWorkspaces(ctx context.Context) ([]*v1alpha1.Workspace, *SessionError) {
+	workspaces, err := s.stackdomeClient.GetCurrentWorkspaces(ctx)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return workspaces, nil
+}
+
+func (s *session) GetCurrentWorskpaceUser(ctx context.Context) (*v1alpha1.WorkspaceUser, *SessionError) {
+	user, err := s.stackdomeClient.GetCurrentUserWorskpaceUser(ctx)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return user, nil
+}
+
+func (s *session) GetWorkspaceStorage(ctx context.Context, id string) (*v1alpha1.WorkspaceStorage, *SessionError) {
+	storage, err := s.stackdomeClient.GetWorkspaceStorage(ctx, id)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return storage, nil
+}
+
+func (s *session) UpdateWorkspaceStorage(ctx context.Context, ID string, userStack *v1alpha1.UserStack) (*v1alpha1.WorkspaceStorage, *SessionError) {
+	storage, err := s.stackdomeClient.UpdateWorkspaceStorage(ctx, ID, userStack)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return storage, nil
+}
+
+func (s *session) DeleteWorkspaceStorage(ctx context.Context, ID string) *SessionError {
+	err := s.stackdomeClient.DeleteWorkspaceStorage(ctx, ID)
+	if err != nil {
+		return ToSessionErr(err)
 	}
 	return nil
 }
 
-func (s *session) Config() *config.Config {
-	return s.config
+func (s *session) MarkAsSynced(ctx context.Context, storageID string, volumeID string) *SessionError {
+	err := s.stackdomeClient.MarkVolumeAsSynced(ctx, storageID, volumeID)
+	if err != nil {
+		return ToSessionErr(err)
+	}
+	return nil
+}
+
+func (s *session) CreateWorkspaceUser(ctx context.Context, desiredWorkspaceUser *v1alpha1.WorkspaceUser) (*v1alpha1.WorkspaceUser, *SessionError) {
+	user, err := s.stackdomeClient.CreateWorkspaceUser(ctx, desiredWorkspaceUser)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return user, nil
+}
+
+func (s *session) UpdateWorkspaceUser(ctx context.Context, ID string, workspaceUser *v1alpha1.WorkspaceUser) (*v1alpha1.WorkspaceUser, *SessionError) {
+	user, err := s.stackdomeClient.UpdateWorkspaceUser(ctx, ID, workspaceUser)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return user, nil
+}
+
+func (s *session) GetCurrentUserWorkspaceStorages(ctx context.Context) ([]*v1alpha1.WorkspaceStorage, *SessionError) {
+	storages, err := s.stackdomeClient.GetCurrentUserWorkspaceStorages(ctx)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return storages, nil
+}
+
+func (s *session) CreateWorkspaceStorage(ctx context.Context, userStack *v1alpha1.UserStack) (*v1alpha1.WorkspaceStorage, *SessionError) {
+	storage, err := s.stackdomeClient.CreateWorkspaceStorage(ctx, userStack)
+	if err != nil {
+		return nil, ToSessionErr(err)
+	}
+	return storage, nil
 }
 
 func (s *session) CreateResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.CreateOption) error {
@@ -144,33 +235,4 @@ func (s *session) UpdateResourceInProvider(ctx context.Context, obj k8sclient.Ob
 
 func (s *session) DeleteResourceInProvider(ctx context.Context, obj k8sclient.Object, opts ...k8sclient.DeleteOption) error {
 	return s.providerClient.Delete(ctx, obj, opts...)
-}
-
-func (s *session) GetWorkspaceVolumesFromProvider(
-	ctx context.Context, wstorage *workspacev1alpha1.WorkspaceStorage) ([]workspacev1alpha1.WorkspaceVolume, error) {
-	workspaceVolumeList := &workspacev1alpha1.WorkspaceVolumeList{}
-	if err := s.providerClient.List(
-		ctx,
-		workspaceVolumeList,
-		k8sclient.InNamespace(wstorage.Namespace),
-		k8sclient.MatchingLabels{workspacev1alpha1.WorkspaceStorageVolumeLabel: wstorage.Name}); err != nil {
-		return nil, err
-	}
-	return workspaceVolumeList.Items, nil
-}
-
-func (s *session) populateAndSaveProviderConfig(input *stackdome.WorkspaceProvisionRequest) error {
-	if s.config.ProviderConfig == nil {
-		s.config.ProviderConfig = &config.ComputeProviderConfig{}
-	}
-	s.config.ProviderConfig.CaCert = input.Status.ClusterCaCert
-	s.config.ProviderConfig.ServerUrl = input.Status.ClusterUrl
-	s.config.ProviderConfig.Namespace = input.Status.WorkspaceNamespace
-	s.config.ProviderConfig.ServiceAccountName = input.Status.WorkspaceServiceAccountname
-	s.config.ProviderConfig.Token = input.Status.WorkspaceServiceaccountToken
-	s.config.ProviderConfig.WorkspaceDomain = input.Status.Domain
-	if err := config.Save(s.config); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-	return nil
 }

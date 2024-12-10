@@ -9,7 +9,6 @@ import (
 
 	"github.com/ashishmax31/voyager-cli/cmd/common"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
@@ -36,27 +35,21 @@ func newSyncSessionStartCommand() *cobra.Command {
 }
 
 func startSyncSession() error {
-	userWorkspace, err := common.UserWorkspace(syncSessionArgs.voyagerFilePath)
+	runtime, err := config.NewRuntime("start-sync", config.Args{
+		StackFilePath: &syncSessionStartArgs.voyagerFilePath,
+	})
 	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
 
-	currSession, err := session.NewSession(cfg, true)
+	syncHandler, err := workspace.NewWorkspaceHandler(runtime)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
-	}
-
-	syncHandler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	userstack, err := runtime.UserStack()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get user stack: %w", err)
 	}
 
 	ctx, cancelFn := context.WithCancel(context.Background())
@@ -66,7 +59,7 @@ func startSyncSession() error {
 	exitedChan := make(chan struct{})
 	go func() {
 		defer close(exitedChan)
-		if err := syncHandler.StartSyncSession(ctx); err != nil {
+		if err := syncHandler.StartSyncSession(ctx, userstack); err != nil {
 			fmt.Printf("sync session stopped with err: %s \n", err.Error())
 		}
 	}()

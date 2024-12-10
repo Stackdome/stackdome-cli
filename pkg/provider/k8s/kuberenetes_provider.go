@@ -73,10 +73,10 @@ func (p *portForwardTarget) TargetType() string {
 
 type k8sProvider struct {
 	cfg            *config.Config
-	providerClient client.ProviderClient
+	providerClient *client.ProviderClient
 }
 
-func NewK8sProvider(cfg *config.Config, client client.ProviderClient) provider.Provider {
+func NewK8sProvider(cfg *config.Config, client *client.ProviderClient) provider.Provider {
 	return &k8sProvider{
 		cfg:            cfg,
 		providerClient: client,
@@ -89,7 +89,7 @@ func (k *k8sProvider) SetupSSHTunnel(ctx context.Context, localPort int, target 
 }
 
 func (k *k8sProvider) SSHUser() string {
-	return STORAGE_POD_SSH_USER
+	return k.cfg.SSHUser()
 }
 
 func (k *k8sProvider) Execute(ctx context.Context, target provider.Target, cmd []string, interactive bool) error {
@@ -281,7 +281,7 @@ func (k *k8sProvider) attachablePodFromTarget(ctx context.Context, client *kuber
 		if err := k.providerClient.Get(
 			ctx, types.NamespacedName{
 				Name:      target.TargetName(),
-				Namespace: k.cfg.ProviderConfig.Namespace,
+				Namespace: k.cfg.CurrentNamespace(),
 			},
 			storageSvc,
 		); err != nil {
@@ -297,7 +297,7 @@ func (k *k8sProvider) attachablePodFromTarget(ctx context.Context, client *kuber
 	if err := k.providerClient.Get(
 		ctx, types.NamespacedName{
 			Name:      target.TargetName(),
-			Namespace: k.cfg.ProviderConfig.Namespace,
+			Namespace: k.cfg.CurrentNamespace(),
 		},
 		referencedPod,
 	); err != nil {

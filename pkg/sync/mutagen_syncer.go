@@ -18,7 +18,7 @@ import (
 
 const (
 	LOCAL_PORT_FOR_SSH_TUNNEL = 17892
-	MUTAGEN_VERSION           = "v0.17.6"
+	MUTAGEN_VERSION           = "v0.18.0"
 )
 
 type SourceDestintionPair struct {
@@ -31,7 +31,9 @@ type SourceDestintionList []SourceDestintionPair
 type mutagenSync struct {
 	cfg             *config.Config
 	lockPath        string
+	syncRunningFlag tools.FileFlag
 	lockDir         string
+	runningFlagPath string
 	mutgenBinaryDir string
 	sshHandler      provider.StorageSSHhandler
 }
@@ -42,9 +44,11 @@ func NewMutagenSyncer(cfg *config.Config, lockDir string, mutgenBinaryDir string
 		lockDir:         lockDir,
 		mutgenBinaryDir: mutgenBinaryDir,
 		sshHandler:      dstSSHhandler,
+		syncRunningFlag: tools.NewFileFlag(filepath.Join(lockDir, "voyager-sync-running.flag")),
 	}
 
 	w.lockPath = filepath.Join(lockDir, "voyager-daemon.lock")
+	w.runningFlagPath = filepath.Join(lockDir, "voyager-sync-running.flag")
 	return w
 }
 
@@ -58,7 +62,15 @@ func (m *mutagenSync) Initialized(context.Context) (bool, error) {
 	return !locked, nil
 }
 
-func (m *mutagenSync) Sync(context.Context) error {
+func (m *mutagenSync) SyncSessionRunning(context.Context) (bool, error) {
+	return m.syncRunningFlag.Raised()
+}
+
+func (m *mutagenSync) SyncSessionRunningFlagPath() string {
+	return m.runningFlagPath
+}
+
+func (m *mutagenSync) ForceSync(context.Context) error {
 	logrus.Debug("in mutagen sync")
 	syncProcess := exec.Command(m.mutagenBinaryPath(), "sync", "flush", "--all")
 	syncProcess.Stdout = os.Stdout
@@ -108,10 +120,6 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 		return err
 	}
 
-	if err := m.cleanupMutagenDaemons(); err != nil {
-		return fmt.Errorf("failed to cleanup mutagen sync sessions: %w", err)
-	}
-
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
 	sshTunnelExitChan, err := m.sshHandler.SetupSSHTunnel(ctx, LOCAL_PORT_FOR_SSH_TUNNEL, target)
@@ -122,6 +130,11 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 	if err := m.ensureSSHConfig(); err != nil {
 		return err
 	}
+
+	if err := m.cleanupMutagenDaemons(); err != nil {
+		return fmt.Errorf("failed to cleanup mutagen sync sessions: %w", err)
+	}
+
 	// Start sync sessions for SourceDestintionList.
 	for _, srcDestPair := range spec {
 		err := m.createMutgenSync(ctx, srcDestPair.Source, srcDestPair.Destination)
@@ -137,10 +150,17 @@ func (m *mutagenSync) SetupSyncSession(ctx context.Context, spec SourceDestintio
 	if err != nil {
 		return err
 	}
+	defer watcher.Stop()
+
+	// Raise the sync running flag for other processes to know that the sync is running.
+	if err := m.syncRunningFlag.Set(); err != nil {
+		return fmt.Errorf("failed to raise the sync running flag: %w", err)
+	}
+	// Cleanup when exiting.
+	defer m.syncRunningFlag.UnSet()
 
 	// We wait for either the context to be cancelled or the lockfile to be deleted
 	// to stop all the daemons and exit.
-	defer watcher.Stop()
 	logrus.Info("watching for lock file to be deleted")
 	select {
 	case <-watcher.NotifyChan():
@@ -169,7 +189,7 @@ func (m *mutagenSync) createMutgenSync(ctx context.Context, srcPath string, dstP
 	user := m.sshHandler.SSHUser()
 	alpha := srcPath
 	beta := fmt.Sprintf("%s@localhost:%d:%s", user, LOCAL_PORT_FOR_SSH_TUNNEL, dstPath)
-	daemonProcess := exec.Command(m.mutagenBinaryPath(), "sync", "create", alpha, beta, "-m", "two-way-safe")
+	daemonProcess := exec.Command(m.mutagenBinaryPath(), "sync", "create", alpha, beta, "-m", "two-way-resolved")
 	daemonProcess.Stdout = os.Stdout
 	daemonProcess.Stderr = os.Stderr
 	// Wait for the forked process to complete.

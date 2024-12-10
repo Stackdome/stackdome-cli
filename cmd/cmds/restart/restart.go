@@ -5,17 +5,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ashishmax31/voyager-cli/cmd/common"
-	"github.com/ashishmax31/voyager-cli/pkg/api/userworkspace"
 	"github.com/ashishmax31/voyager-cli/pkg/config"
-	"github.com/ashishmax31/voyager-cli/pkg/session"
 	"github.com/ashishmax31/voyager-cli/pkg/workspace"
 	"github.com/spf13/cobra"
 )
 
 var restartArgs struct {
-	voyagerFilePath string
-	all             bool
+	all bool
 }
 
 func NewRestartCommand() *cobra.Command {
@@ -32,48 +28,31 @@ func NewRestartCommand() *cobra.Command {
 		Args: cobra.RangeArgs(0, 1),
 	}
 	restartCmd.Flags().BoolVarP(&restartArgs.all, "all", "a", false, "-a or --all")
-	restartCmd.Flags().StringVar(&restartArgs.voyagerFilePath, common.VoyagerFilePathFlag, "", fmt.Sprintf("--%s=voyagerfile.yaml", common.VoyagerFilePathFlag))
 	return restartCmd
 }
 
 func restart(ctx context.Context, args []string) error {
-	userWorkspace, err := common.UserWorkspace(restartArgs.voyagerFilePath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	// Provider initialized.
-	currSession, err := session.NewSession(cfg, true)
-	if err != nil {
-		return err
+	if len(args) == 0 && !restartArgs.all {
+		return fmt.Errorf("atleast one argument is required or pass --all flag")
 	}
 
-	if err := userWorkspace.Process(); err != nil {
-		return err
+	// If no resource name is provided, then pass an empty string
+	if len(args) == 0 {
+		args = append(args, "")
 	}
 
-	if err := common.ValidateResourceNameRef(args, userWorkspace, restartArgs.all); err != nil {
-		return err
-	}
-	handler, err := workspace.NewWorkspaceStorageHandler(currSession, *userWorkspace)
+	runtime, err := config.NewRuntime("restart", config.Args{
+		AllResources: &restartArgs.all,
+		ResourceName: &args[0],
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create runtime: %w", err)
 	}
-	if restartArgs.all {
-		args = []string{"all"}
-	}
-	return handler.Restart(ctx, args[0])
-}
 
-func validateResourceNameRef(resourceName string, ws *userworkspace.Workspace) error {
-	if resourceName == "all" {
-		return nil
+	handler, err := workspace.NewWorkspaceHandler(runtime)
+	if err != nil {
+		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}
-	if _, found := ws.Resources[resourceName]; !found {
-		return fmt.Errorf("resource '%s' not found in voyagerfile.[Please enter a valid resource defined in the voyagerfile or 'all']", resourceName)
-	}
-	return nil
+
+	return handler.Restart(ctx, runtime)
 }

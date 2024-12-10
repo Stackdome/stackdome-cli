@@ -3,60 +3,81 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/ashishmax31/voyager-cli/pkg/mapper"
-	"github.com/sirupsen/logrus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
-	workspacev1alpha1 "soradev.io/cluster-agent/api/v1alpha1"
+	"github.com/ashishmax31/voyager-cli/pkg/config"
 )
 
-func (w *WorkspaceHandler) Restart(ctx context.Context, resourceName string) error {
-	initialized, err := w.syncHandler.Initialized(ctx)
-	if err != nil {
-		return workspaceHandlerErr("failed to check sync session status: %w", err)
+func (w *workspaceHandler) Restart(ctx context.Context, runtime *config.Runtime) error {
+	currentWorkspaceName := runtime.Config().CurrentWorkspace
+	if currentWorkspaceName == nil {
+		return workspaceHandlerErr("current workspace not set")
 	}
-	if initialized {
-		if err := w.Sync(ctx); err != nil {
-			return err
-		}
-		if resourceName == "all" {
-			fmt.Println("Restarting all resources...")
-		} else {
-			fmt.Printf("Restarting '%s'...\n", resourceName)
-		}
-		desiredWS := mapper.MapVoyagerFileToWorkspaceCR(
-			w.userdefinedWorkspace,
-			w.session.Config().Username,
-			w.session.Config().ProviderConfig.Namespace,
-			w.session.Config().Organisation,
-			w.session.Config().ProviderConfig.WorkspaceDomain,
-		)
-		existingWS, present, err := w.getWorkspace(ctx, desiredWS)
-		if err != nil {
-			return err
-		}
-		if present {
-			if resourceName == "all" {
-				w.markResourceForRestart(existingWS, resourceName, true)
-			} else {
-				w.markResourceForRestart(existingWS, resourceName, false)
-			}
-			logrus.Debugf("restart requested WS: %+v\n", existingWS.Spec.Resources)
-			return w.session.UpdateResourceInProvider(ctx, existingWS)
-		}
-		return fmt.Errorf("workspace not yet deployed. Please run voyager deploy first.")
+
+	if runtime.Args.IsAllResources() {
+		return w.restartAllResources(ctx, runtime)
 	}
-	return fmt.Errorf("sync session not running! Please run voyager sync init")
+
+	resourceName := runtime.Args.GetResourceName()
+	if resourceName == "" {
+		return workspaceHandlerErr("resource name not specified")
+	}
+
+	return w.restartResource(ctx, resourceName)
 }
 
-func (w *WorkspaceHandler) markResourceForRestart(ws *workspacev1alpha1.Workspace, resourceName string, restartAll bool) {
-	for i := range ws.Spec.Resources {
-		currResource := &ws.Spec.Resources[i]
-		if currResource.Name == resourceName || restartAll {
-			currResourceSpecPtr := &currResource.Spec
-			currResourceSpecPtr.RestartRequest = ptr.To(metav1.NewTime(time.Now().UTC()))
+func (w *workspaceHandler) restartAllResources(ctx context.Context, runtime *config.Runtime) error {
+	currentWorkspace, err := w.workspaceService.GetWorkspaceByName(ctx, *runtime.Config().CurrentWorkspace)
+	if err != nil {
+		return workspaceHandlerErr("failed to get current workspace '%s': %w", *runtime.Config().CurrentWorkspace, err)
+	}
+
+	if currentWorkspace.HasLocalSyncingVolumes() {
+		if err := w.handleStorageSync(ctx); err != nil {
+			return workspaceHandlerErr("failed to sync: %w", err)
 		}
 	}
+
+	if err := w.workspaceService.RestartAllResources(ctx, currentWorkspace); err != nil {
+		return workspaceHandlerErr("failed to restart all resources: %w", err)
+	}
+	fmt.Printf("workspace '%s' marked for restart\n", currentWorkspace.Name)
+	return nil
+}
+
+func (w *workspaceHandler) restartResource(ctx context.Context, resourceName string) error {
+	currentWorkspace, err := w.workspaceService.GetWorkspaceByName(ctx, *w.runtime.Config().CurrentWorkspace)
+	if err != nil {
+		return workspaceHandlerErr("failed to get current workspace '%s': %w", *w.runtime.Config().CurrentWorkspace, err)
+	}
+
+	resource := currentWorkspace.GetResourceByName(resourceName)
+	if resource == nil {
+		return workspaceHandlerErr("resource '%s' not found", resourceName)
+	}
+
+	if currentWorkspace.ResourceHasLocalSyncingVolume(resourceName) {
+		if err := w.handleStorageSync(ctx); err != nil {
+			return workspaceHandlerErr("failed to sync: %w", err)
+		}
+	}
+
+	if err := w.workspaceService.RestartResource(ctx, currentWorkspace, resourceName); err != nil {
+		return workspaceHandlerErr("failed to restart resource '%s': %w", resourceName, err)
+	}
+	fmt.Printf("resource '%s' marked for restart\n", resourceName)
+	return nil
+}
+
+func (w *workspaceHandler) handleStorageSync(ctx context.Context) error {
+	initialized, werr := w.syncHandler.Initialized(ctx)
+	if werr != nil {
+		return workspaceHandlerErr("failed to check sync session status: %w", werr)
+	}
+	if !initialized {
+		return workspaceHandlerErr("sync session not running! Please run voyager sync init")
+	}
+	if err := w.syncHandler.ForceSync(ctx); err != nil {
+		return workspaceHandlerErr("failed to force sync: %w", err)
+	}
+	return nil
 }

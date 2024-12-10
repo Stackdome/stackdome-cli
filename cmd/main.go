@@ -4,9 +4,11 @@ import (
 	"os"
 
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/build"
+	"github.com/ashishmax31/voyager-cli/cmd/cmds/delete"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/deploy"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/exec"
 	initcmd "github.com/ashishmax31/voyager-cli/cmd/cmds/init"
+	"github.com/ashishmax31/voyager-cli/cmd/cmds/list"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/login"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/logs"
 	"github.com/ashishmax31/voyager-cli/cmd/cmds/restart"
@@ -18,13 +20,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var logLevel string
+
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "voyager-cli",
+		Use:   "voyager-cli [--log-level=debug|info|warn|error|fatal|panic]",
 		Short: "CLI to manage, lifecycle and interact with your applications deployed on voyager stack",
 		Long:  `CLI to manage, lifecycle and interact with your applications deployed on voyager stack`,
 	}
-	var logLevel string
 	buildCmd := build.NewBuildCommand()
 	deployCmd := deploy.NewDeployCommand()
 	initCmd := initcmd.NewInitCommand()
@@ -36,8 +39,23 @@ func main() {
 	statusCmd := status.NewStatusCommand()
 	execCmd := exec.NewExecCommand()
 	logsCmd := logs.NewLogsCommand()
-
-	rootCmd.AddCommand(buildCmd, deployCmd, initCmd, loginCmd, syncCmd, validateCmd, syncSessionCmd, restartCmd, statusCmd, execCmd, logsCmd)
+	deleteWorkspaceCmd := delete.NewWorkspaceDeleteCommand()
+	listCmd := list.NewListCommand()
+	rootCmd.AddCommand(
+		buildCmd,
+		deployCmd,
+		initCmd,
+		loginCmd,
+		syncCmd,
+		validateCmd,
+		syncSessionCmd,
+		restartCmd,
+		statusCmd,
+		execCmd,
+		logsCmd,
+		deleteWorkspaceCmd,
+		listCmd,
+	)
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, info, warn)")
 	level, err := logrus.ParseLevel(logLevel)
 	if err != nil {
