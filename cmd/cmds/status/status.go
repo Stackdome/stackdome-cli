@@ -18,10 +18,15 @@ var statusArgs struct {
 
 func NewStatusCommand() *cobra.Command {
 	var statusCmd = &cobra.Command{
-		Use:   "status",
+		Use:   "status [--all] | [resourceName]",
 		Short: "Get the status of a resource/all resources",
 		Long:  `Get the status of a resource/all resources. Pass --all or -a flag to print the status of all resources.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			if (len(args) == 0 || len(args[0]) == 0) && !statusArgs.all {
+				// either --all flag or resourceName is required
+				fmt.Println("either --all flag or resourceName is required")
+				os.Exit(1)
+			}
 			if err := status(context.Background(), args); err != nil {
 				fmt.Printf("status error: %s \n", err.Error())
 				os.Exit(1)
@@ -34,10 +39,6 @@ func NewStatusCommand() *cobra.Command {
 }
 
 func status(ctx context.Context, args []string) error {
-	if !statusArgs.all && len(args) == 0 {
-		return fmt.Errorf("no resources specified. Run status <resourceName> to get the status of the resource")
-	}
-
 	if len(args) == 0 {
 		args = append(args, "")
 	}
@@ -51,7 +52,6 @@ func status(ctx context.Context, args []string) error {
 	}
 
 	handler, err := workspace.NewWorkspaceHandler(runtime)
-
 	if err != nil {
 		return fmt.Errorf("failed to create workspace handler: %w", err)
 	}

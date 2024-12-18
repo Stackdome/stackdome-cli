@@ -119,7 +119,7 @@ type ExecutionConfig struct {
 }
 
 type LifecycleConfig struct {
-	LastRestartRequestTime *time.Time
+	RestartRequestTime *time.Time
 }
 
 type VolumeMount struct {
@@ -130,11 +130,12 @@ type VolumeMount struct {
 }
 
 type WorkspaceResourceStatus struct {
-	ObservedVersion     int32
-	InternalServiceName *string
-	State               string
-	Conditions          []Condition
-	PublicIngresses     []Ingress
+	ObservedVersion                 int32
+	InternalServiceName             *string
+	State                           string
+	LastRestartRequestProcessedTime *time.Time
+	Conditions                      []Condition
+	PublicIngresses                 []Ingress
 }
 
 type Ingress struct {

@@ -21,10 +21,11 @@ type WorkspaceService interface {
 	GetWorkspaceByName(ctx context.Context, name string) (*v1alpha1.Workspace, *ServiceError)
 	UpdateWorkspace(ctx context.Context, ID string, workspace *v1alpha1.UserStack) (*v1alpha1.Workspace, *ServiceError)
 	DeleteWorkspace(ctx context.Context, ID string) *ServiceError
-
+	ListWorkspaceResources(ctx context.Context, workspaceID string) ([]v1alpha1.WorkspaceResource, *ServiceError)
 	TriggerBuildForAllResources(ctx context.Context, workspace *v1alpha1.Workspace) *ServiceError
 	TriggerBuildForResource(ctx context.Context, workspace *v1alpha1.Workspace, resourceName string) *ServiceError
-
+	ListWorkspaceBuilds(ctx context.Context, workspace *v1alpha1.Workspace) ([]v1alpha1.ResourceBuild, *ServiceError)
+	ListWorkspaceResourceBuilds(ctx context.Context, workspace *v1alpha1.Workspace, resource *v1alpha1.WorkspaceResource) ([]v1alpha1.ResourceBuild, *ServiceError)
 	RestartAllResources(ctx context.Context, workspace *v1alpha1.Workspace) *ServiceError
 	RestartResource(ctx context.Context, workspace *v1alpha1.Workspace, resourceName string) *ServiceError
 }
@@ -70,6 +71,43 @@ func (w *workspaceService) GetCurrentWorkspaces(ctx context.Context) ([]*v1alpha
 		return nil, NewServiceError(serr)
 	}
 	return workspaces, nil
+}
+
+func (w *workspaceService) ListWorkspaceResources(ctx context.Context, workspaceID string) ([]v1alpha1.WorkspaceResource, *ServiceError) {
+	resources, serr := w.session.GetWorkspaceResources(ctx, workspaceID)
+	if serr != nil {
+		return nil, NewServiceError(serr)
+	}
+	return resources, nil
+}
+
+func (w *workspaceService) ListWorkspaceBuilds(ctx context.Context, workspace *v1alpha1.Workspace) ([]v1alpha1.ResourceBuild, *ServiceError) {
+	builds, serr := w.session.GetWorkspaceBuilds(ctx, workspace)
+	if serr != nil {
+		return nil, NewServiceError(serr)
+	}
+	for i := range builds {
+		builds[i].WorkspaceName = workspace.Name
+		resource := workspace.GetResourceByName(builds[i].WorkspaceResourceName)
+		if resource != nil && resource.BuildConfig != nil && resource.BuildConfig.ContextDirHash == builds[i].SourceHash {
+			builds[i].Current = true
+		}
+	}
+	return builds, nil
+}
+
+func (w *workspaceService) ListWorkspaceResourceBuilds(ctx context.Context, workspace *v1alpha1.Workspace, resource *v1alpha1.WorkspaceResource) ([]v1alpha1.ResourceBuild, *ServiceError) {
+	builds, serr := w.session.GetWorkspaceResourceBuilds(ctx, workspace, resource.Name)
+	if serr != nil {
+		return nil, NewServiceError(serr)
+	}
+	for i := range builds {
+		builds[i].WorkspaceName = workspace.Name
+		if resource.BuildConfig != nil && resource.BuildConfig.ContextDirHash == builds[i].SourceHash {
+			builds[i].Current = true
+		}
+	}
+	return builds, nil
 }
 
 func (w *workspaceService) GetWorkspace(ctx context.Context, id string) (*v1alpha1.Workspace, *ServiceError) {
@@ -155,7 +193,7 @@ func (w *workspaceService) RestartAllResources(ctx context.Context, existingWork
 	for i := range existingWorkspace.Resources {
 		currResource := &existingWorkspace.Resources[i]
 		currResource.LifecycleConfig = &v1alpha1.LifecycleConfig{
-			LastRestartRequestTime: ptr.To(time.Now().UTC()),
+			RestartRequestTime: ptr.To(time.Now().UTC().Round(time.Second)),
 		}
 	}
 	_, err := w.session.UpdateWorkspace(ctx, existingWorkspace.ID, existingWorkspace)
@@ -170,7 +208,7 @@ func (w *workspaceService) RestartResource(ctx context.Context, existingWorkspac
 		currResource := &existingWorkspace.Resources[i]
 		if currResource.Name == resourceName {
 			currResource.LifecycleConfig = &v1alpha1.LifecycleConfig{
-				LastRestartRequestTime: ptr.To(time.Now().UTC()),
+				RestartRequestTime: ptr.To(time.Now().UTC().Round(time.Second)),
 			}
 			_, err := w.session.UpdateWorkspace(ctx, existingWorkspace.ID, existingWorkspace)
 			if err != nil {

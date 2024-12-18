@@ -96,7 +96,7 @@ func (w *workspaceHandler) deleteWorkspace(ctx context.Context, runtime *config.
 			if workspaceStorage.WorkspaceName == workspace.Name {
 				if err := w.workspaceStorageService.DeleteWorkspaceStorage(ctx, workspaceStorage.ID); err != nil {
 					if err.Code == http.StatusNotFound {
-						logrus.Infof("workspace storage '%s' not found", workspaceName)
+						logrus.Infof("workspace storage for workspace '%s' not found", workspaceName)
 						return nil
 					}
 					return workspaceHandlerErr("failed to delete workspace storage '%s': %w", workspaceName, err)

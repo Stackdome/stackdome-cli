@@ -156,7 +156,7 @@ func toClientLifecycleConfig(in *serverapi.LifecycleConfig) *clientapi.Lifecycle
 		return nil
 	}
 	return &clientapi.LifecycleConfig{
-		LastRestartRequestTime: in.LastRestartRequestTime,
+		RestartRequestTime: in.RestartRequestTime,
 	}
 }
 
@@ -176,11 +176,12 @@ func toClientWorkspaceResourceStatus(in *serverapi.ResourceStatus) *clientapi.Wo
 		return nil
 	}
 	return &clientapi.WorkspaceResourceStatus{
-		ObservedVersion:     in.GetObservedVersion(),
-		State:               in.GetState(),
-		InternalServiceName: in.InternalServiceName,
-		PublicIngresses:     toClientPublicIngress(in.PublicIngress),
-		Conditions:          ToClientAPIConditions(in.Conditions),
+		ObservedVersion:                 in.GetObservedVersion(),
+		State:                           in.GetState(),
+		InternalServiceName:             in.InternalServiceName,
+		LastRestartRequestProcessedTime: in.LastRestartRequestProcessedAt,
+		PublicIngresses:                 toClientPublicIngress(in.PublicIngress),
+		Conditions:                      ToClientAPIConditions(in.Conditions),
 	}
 }
 
@@ -247,7 +248,7 @@ func toServerLifecycleConfig(in *clientapi.LifecycleConfig) *serverapi.Lifecycle
 		return nil
 	}
 	return &serverapi.LifecycleConfig{
-		LastRestartRequestTime: in.LastRestartRequestTime,
+		RestartRequestTime: in.RestartRequestTime,
 	}
 }
 

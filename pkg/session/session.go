@@ -71,7 +71,8 @@ type Session interface {
 	UpdateWorkspace(ctx context.Context, ID string, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError)
 	DeleteWorkspace(ctx context.Context, ID string) *SessionError
 	GetCurrentWorkspaces(ctx context.Context) ([]*v1alpha1.Workspace, *SessionError)
-
+	GetWorkspaceBuilds(ctx context.Context, workspace *v1alpha1.Workspace) ([]v1alpha1.ResourceBuild, *SessionError)
+	GetWorkspaceResourceBuilds(ctx context.Context, workspace *v1alpha1.Workspace, resourceName string) ([]v1alpha1.ResourceBuild, *SessionError)
 	ProviderClient() *client.ProviderClient
 }
 
@@ -123,6 +124,25 @@ func (s *session) GetWorkspaceResources(ctx context.Context, id string) ([]v1alp
 		return nil, ToSessionErr(serr)
 	}
 	return workspaceResources, nil
+}
+
+func (s *session) GetWorkspaceBuilds(ctx context.Context, workspace *v1alpha1.Workspace) ([]v1alpha1.ResourceBuild, *SessionError) {
+	builds, serr := s.stackdomeClient.GetWorkspaceBuilds(ctx, workspace.ID)
+	if serr != nil {
+		return nil, ToSessionErr(serr)
+	}
+	for i := range builds {
+		builds[i].WorkspaceName = workspace.Name
+	}
+	return builds, nil
+}
+
+func (s *session) GetWorkspaceResourceBuilds(ctx context.Context, workspace *v1alpha1.Workspace, resourceName string) ([]v1alpha1.ResourceBuild, *SessionError) {
+	builds, serr := s.stackdomeClient.GetWorkspaceResourceBuilds(ctx, workspace.ID, resourceName)
+	if serr != nil {
+		return nil, ToSessionErr(serr)
+	}
+	return builds, nil
 }
 
 func (s *session) UpdateWorkspace(ctx context.Context, ID string, workspace *v1alpha1.Workspace) (*v1alpha1.Workspace, *SessionError) {

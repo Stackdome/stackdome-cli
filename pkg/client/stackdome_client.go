@@ -42,7 +42,8 @@ type StackdomeAPIClient interface {
 	UpdateWorkspace(ctx context.Context, ID string, workspace *internalapi.Workspace) (*internalapi.Workspace, *StackdomeAPIError)
 	DeleteWorkspace(ctx context.Context, ID string) *StackdomeAPIError
 	GetCurrentWorkspaces(ctx context.Context) ([]*internalapi.Workspace, *StackdomeAPIError)
-
+	GetWorkspaceBuilds(ctx context.Context, workspaceID string) ([]internalapi.ResourceBuild, *StackdomeAPIError)
+	GetWorkspaceResourceBuilds(ctx context.Context, workspaceID string, resourceName string) ([]internalapi.ResourceBuild, *StackdomeAPIError)
 	MarkVolumeAsSynced(ctx context.Context, workspaceStorageID string, volumeID string) *StackdomeAPIError
 }
 
@@ -119,6 +120,24 @@ func (c *stackdomeClient) GetWorkspaceResources(ctx context.Context, id string) 
 		return nil, handleError(httpResp, err, "failed to get workspace")
 	}
 	return mapper.ToClientWorkspaceResources(resp.Items), nil
+}
+
+func (c *stackdomeClient) GetWorkspaceBuilds(ctx context.Context, workspaceID string) ([]internalapi.ResourceBuild, *StackdomeAPIError) {
+	resp, httpResp, err := c.client.DefaultApi.ApiV1OrganizationsOrgIdWorkspacesWorkspaceIdBuildsGet(
+		c.withAuthenticatedCtx(ctx), c.OrganisationID, workspaceID).Execute()
+	if err != nil {
+		return nil, handleError(httpResp, err, "failed to get workspace builds")
+	}
+	return mapper.ToClientResourceBuilds(resp.Items), nil
+}
+
+func (c *stackdomeClient) GetWorkspaceResourceBuilds(ctx context.Context, workspaceID string, resourceName string) ([]internalapi.ResourceBuild, *StackdomeAPIError) {
+	resp, httpResp, err := c.client.DefaultApi.ApiV1OrganizationsOrgIdWorkspacesWorkspaceIdResourcesIdBuildsGet(
+		c.withAuthenticatedCtx(ctx), c.OrganisationID, workspaceID, resourceName).Execute()
+	if err != nil {
+		return nil, handleError(httpResp, err, "failed to get workspace resource builds")
+	}
+	return mapper.ToClientResourceBuilds(resp.Items), nil
 }
 
 func (c *stackdomeClient) UpdateWorkspace(ctx context.Context, ID string, workspace *internalapi.Workspace) (*internalapi.Workspace, *StackdomeAPIError) {

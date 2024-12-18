@@ -10,6 +10,6 @@ func NewListCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 
-	listCmd.AddCommand(newListWorkspacesCommand(), newListWorkspaceStorageCommand())
+	listCmd.AddCommand(newListWorkspacesCommand(), newListWorkspaceStorageCommand(), newListBuildsCommand())
 	return listCmd
 }
