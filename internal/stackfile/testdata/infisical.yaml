@@ -1,0 +1,49 @@
+name: infisical
+
+resources:
+  infisical:
+    image: infisical/infisical:latest
+    ports:
+      - name: http
+        port: 80
+        public: true
+        subdomain: infisical
+    env:
+      SITE_URL: "{{ self.public.http.url }}"
+      DB_HOST: "{{ db.host }}"
+      DB_PORT: "{{ db.port }}"
+      REDIS_HOST: "{{ redis.host }}"
+      ENCRYPTION_KEY: "my-secret-key"
+    depends_on:
+      - db
+      - redis
+
+  db:
+    image: postgres:14-alpine
+    ports:
+      - name: postgres
+        port: 5432
+        protocol: TCP
+    env:
+      POSTGRES_DB: infisical
+    volumes:
+      - name: pg-data
+        path: /var/lib/postgresql/data
+    stateful: true
+
+  redis:
+    image: redis:latest
+    ports:
+      - name: redis
+        port: 6379
+        protocol: TCP
+    volumes:
+      - name: redis-data
+        path: /data
+    stateful: true
+
+volumes:
+  pg-data:
+    size: 5Gi
+  redis-data:
+    size: 1Gi
