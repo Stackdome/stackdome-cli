@@ -53,6 +53,10 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o", "table", "Output format (table, json, yaml)")
 
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newLoginCmd())
+	rootCmd.AddCommand(newLogoutCmd())
+	rootCmd.AddCommand(newSignupCmd())
+	rootCmd.AddCommand(newConfigCmd())
 
 	return rootCmd
 }
