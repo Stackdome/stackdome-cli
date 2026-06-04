@@ -1,6 +1,6 @@
-module github.com/ashishmax31/voyager-cli
+module github.com/stackdome/cli
 
-go 1.22.5
+go 1.25.0
 
 require (
 	github.com/ashishmax31/stackdome-api-server v0.0.0-00010101000000-000000000000
