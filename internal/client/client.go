@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -136,12 +137,30 @@ func (c *Client) TryRefreshToken(ctx context.Context) error {
 
 func WrapError(httpResp *http.Response, err error, message string) error {
 	if httpResp != nil {
-		return clierrors.FromHTTP(httpResp.StatusCode, err.Error()).WithDetail(message)
+		reason := extractAPIReason(err)
+		if reason != "" {
+			return clierrors.FromHTTP(httpResp.StatusCode, reason)
+		}
+		return clierrors.FromHTTP(httpResp.StatusCode, err.Error())
 	}
 	if isTimeoutError(err) {
 		return clierrors.Wrapf(err, "%s: request timed out", message)
 	}
 	return clierrors.Wrapf(err, message)
+}
+
+func extractAPIReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	body := err.Error()
+	var apiErr struct {
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal([]byte(body), &apiErr) == nil && apiErr.Reason != "" {
+		return apiErr.Reason
+	}
+	return ""
 }
 
 func isTimeoutError(err error) bool {

@@ -57,6 +57,11 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newSignupCmd())
 	rootCmd.AddCommand(newConfigCmd())
+	rootCmd.AddCommand(newDeployCmd())
+	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newDestroyCmd())
+	rootCmd.AddCommand(newValidateCmd())
+	rootCmd.AddCommand(newStackCmd())
 
 	return rootCmd
 }

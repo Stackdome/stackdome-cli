@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"text/tabwriter"
 
+	"github.com/charmbracelet/lipgloss"
+	lgTable "github.com/charmbracelet/lipgloss/table"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,37 +72,37 @@ func (f *Formatter) IsTable() bool {
 	return f.Format == FormatTable
 }
 
-func (f *Formatter) NewTable() *Table {
-	tw := tabwriter.NewWriter(f.Writer, 0, 0, 2, ' ', 0)
-	return &Table{tw: tw}
+func (f *Formatter) NewTable(headers ...string) *Table {
+	return &Table{
+		writer:  f.Writer,
+		headers: headers,
+	}
 }
 
 type Table struct {
-	tw *tabwriter.Writer
-}
-
-func (t *Table) AddHeader(cols ...string) {
-	for i, col := range cols {
-		if i > 0 {
-			fmt.Fprint(t.tw, "\t")
-		}
-		fmt.Fprint(t.tw, Bold(col))
-	}
-	fmt.Fprintln(t.tw)
+	writer  io.Writer
+	headers []string
+	rows    [][]string
 }
 
 func (t *Table) AddRow(cols ...string) {
-	for i, col := range cols {
-		if i > 0 {
-			fmt.Fprint(t.tw, "\t")
-		}
-		fmt.Fprint(t.tw, col)
-	}
-	fmt.Fprintln(t.tw)
+	t.rows = append(t.rows, cols)
 }
 
-func (t *Table) Flush() error {
-	return t.tw.Flush()
+func (t *Table) Render() {
+	tbl := lgTable.New().
+		Border(lipgloss.HiddenBorder()).
+		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).BorderHeader(false).
+		Headers(t.headers...).
+		Rows(t.rows...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == lgTable.HeaderRow {
+				return lipgloss.NewStyle().Bold(true).PaddingRight(2)
+			}
+			return lipgloss.NewStyle().PaddingRight(2)
+		})
+
+	fmt.Fprintln(t.writer, tbl)
 }
 
 func (f *Formatter) Println(args ...any) {

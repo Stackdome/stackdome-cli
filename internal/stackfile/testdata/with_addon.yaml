@@ -13,4 +13,4 @@ resources:
         database: appdb
         env:
           DATABASE_URL: "postgres://{{ username }}:{{ password }}@{{ host }}:{{ port }}/{{ database }}"
-          DB_HOST: host
+          DB_HOST: "{{ host }}"

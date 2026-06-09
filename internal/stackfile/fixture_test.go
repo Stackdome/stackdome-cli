@@ -100,11 +100,11 @@ func TestFixture_Infisical(t *testing.T) {
 		if v, ok := envMap["SITE_URL"]; !ok || v.SelfOutput == nil {
 			t.Error("SITE_URL should be self output")
 		}
-		if v, ok := envMap["ENCRYPTION_KEY"]; !ok || *v.Value != "my-secret-key" {
+		if v, ok := envMap["ENCRYPTION_KEY"]; !ok || *v.Value != "6c1fe4e407b8911c104518103505b218" {
 			t.Error("ENCRYPTION_KEY should be literal")
 		}
-		if _, ok := envMap["DB_HOST"]; ok {
-			t.Error("DB_HOST should be a connection, not in execution config")
+		if _, ok := envMap["DB_CONNECTION_URI"]; ok {
+			t.Error("DB_CONNECTION_URI should be a connection, not in execution config")
 		}
 	}
 }
@@ -141,7 +141,7 @@ func TestFixture_WithAddon(t *testing.T) {
 
 	found := false
 	for _, conn := range stack.Spec.Connections {
-		if conn.From.Type == "addon/postgres" && *conn.From.Id == "pg-addon-id" {
+		if conn.From.Type == "addon/postgres" && *conn.From.Name == "pg-addon-id" {
 			found = true
 			if conn.Config == nil || conn.Config.PostgresEnvConfig == nil {
 				t.Fatal("expected postgres config")

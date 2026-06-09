@@ -44,6 +44,12 @@ func Cyan(text string) string    { return colorize(cyan, text) }
 func Bold(text string) string    { return colorize(bold, text) }
 func Dim(text string) string     { return colorize(dim, text) }
 
+// TabEscape wraps ANSI-colored text with \xff markers so that
+// tabwriter.StripEscape excludes the invisible bytes from width calculation.
+func TabEscape(s string) string {
+	return "\xff" + s + "\xff"
+}
+
 func StateColor(state string) string {
 	switch state {
 	case "Ready":

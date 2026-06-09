@@ -2,6 +2,10 @@ package stackfile
 
 import "gopkg.in/yaml.v3"
 
+const (
+	PostgresAddonType = "postgres"
+)
+
 type Stackfile struct {
 	Name      string               `yaml:"name"`
 	Resources map[string]Resource  `yaml:"resources"`
@@ -9,11 +13,13 @@ type Stackfile struct {
 }
 
 type Resource struct {
-	Image     string                           `yaml:"image,omitempty"`
-	Build     *BuildConfig                     `yaml:"build,omitempty"`
-	Ports     []PortDef                        `yaml:"ports,omitempty"`
-	Env       map[string]string                `yaml:"env,omitempty"`
-	Secrets   map[string]SecretMapping         `yaml:"secrets,omitempty"`
+	Image string            `yaml:"image,omitempty"`
+	Build *BuildConfig      `yaml:"build,omitempty"`
+	Ports []PortDef         `yaml:"ports,omitempty"`
+	Env   map[string]string `yaml:"env,omitempty"`
+	// Secret Name -> Mapping of secret keys to env var names
+	Secrets map[string]SecretMapping `yaml:"secrets,omitempty"`
+	// Addon Name -> Connection Config
 	Addons    map[string]AddonConnectionConfig `yaml:"addons,omitempty"`
 	Volumes   []VolumeMountDef                 `yaml:"volumes,omitempty"`
 	DependsOn []string                         `yaml:"depends_on,omitempty"`
@@ -52,8 +58,12 @@ type VolumeMountDef struct {
 type SecretMapping map[string]string
 
 type AddonConnectionConfig struct {
-	Type     string            `yaml:"type"`
-	Env      map[string]string `yaml:"env"`
+	Type string `yaml:"type"`
+	// Env vars to inject into the resource, with values templated from the addon outputs. E.g. for a postgres addon we might have:
+	// env:
+	//   POSTGRES_HOST: {{ postgres.host }}
+	//   POSTGRES_URI: postgres://{{ postgres.host }}:{{ postgres.port }}
+	Env      map[string]string    `yaml:"env"`
 	Postgres *PostgresAddonConfig `yaml:"-"`
 
 	rawNode yaml.Node `yaml:"-"`
@@ -78,7 +88,7 @@ func (a *AddonConnectionConfig) UnmarshalYAML(node *yaml.Node) error {
 	a.Env = base.Env
 
 	switch a.Type {
-	case "postgres":
+	case PostgresAddonType:
 		var pg PostgresAddonConfig
 		if err := node.Decode(&pg); err != nil {
 			return err

@@ -191,6 +191,9 @@ func TestToStack_SelfOutputEnv(t *testing.T) {
 		Resources: map[string]Resource{
 			"app": {
 				Image: "myapp:latest",
+				Ports: []PortDef{
+					{Name: "http", Port: 8080, Public: true, Subdomain: "app"},
+				},
 				Env: map[string]string{
 					"SITE_URL": "{{ self.public.http.url }}",
 				},
@@ -211,16 +214,15 @@ func TestToStack_SelfOutputEnv(t *testing.T) {
 	}
 }
 
-func TestToStack_ResourceRefEnvGeneratesConnection(t *testing.T) {
+func TestToStack_ResourceRefSimpleOutput(t *testing.T) {
 	sf := &Stackfile{
 		Name: "ref-test",
 		Resources: map[string]Resource{
 			"app": {
 				Image: "myapp:latest",
 				Env: map[string]string{
-					"DB_HOST":        "{{ db.host }}",
-					"DB_PORT":        "{{ db.port }}",
-					"LITERAL_VALUE":  "hello",
+					"DB_HOST":       "{{ db.host }}",
+					"LITERAL_VALUE": "hello",
 				},
 			},
 			"db": {
@@ -231,34 +233,79 @@ func TestToStack_ResourceRefEnvGeneratesConnection(t *testing.T) {
 
 	stack := sf.ToStack()
 
-	// Resource ref env vars should NOT appear in execution config
 	for _, res := range stack.Spec.StackResources {
 		if res.Name == "app" && res.ExecutionConfig != nil {
 			for _, ev := range res.ExecutionConfig.EnvironmentVariables {
-				if ev.Name == "DB_HOST" || ev.Name == "DB_PORT" {
-					t.Errorf("resource ref %q should not be in execution config", ev.Name)
+				if ev.Name == "DB_HOST" {
+					t.Error("DB_HOST should not be in execution config")
 				}
 			}
 		}
 	}
 
-	// Should generate a connection from db → app
 	found := false
 	for _, conn := range stack.Spec.Connections {
 		if conn.Kind == "env" && conn.From.Type == "stack_resource" && *conn.From.Name == "db" && *conn.To.Name == "app" {
 			found = true
-			if len(conn.Mappings) != 2 {
-				t.Errorf("expected 2 mappings, got %d", len(conn.Mappings))
+			if len(conn.Mappings) != 1 {
+				t.Errorf("expected 1 mapping, got %d", len(conn.Mappings))
 			}
-			mappingMap := make(map[string]string)
-			for _, m := range conn.Mappings {
-				mappingMap[*m.Target.Name] = *m.Value.Output
+			m := conn.Mappings[0]
+			if *m.Target.Name != "DB_HOST" || *m.Value.Output != "host" {
+				t.Errorf("expected DB_HOST→host, got %s→%s", *m.Target.Name, *m.Value.Output)
 			}
-			if mappingMap["DB_HOST"] != "host" {
-				t.Errorf("expected DB_HOST→host mapping, got %v", mappingMap)
+		}
+	}
+	if !found {
+		t.Error("expected connection from db to app")
+	}
+}
+
+func TestToStack_ResourceRefTemplate(t *testing.T) {
+	sf := &Stackfile{
+		Name: "template-ref",
+		Resources: map[string]Resource{
+			"app": {
+				Image: "myapp:latest",
+				Env: map[string]string{
+					"DB_URL": "postgres://user:pass@{{ db.host }}:5432/mydb",
+				},
+			},
+			"db": {
+				Image: "postgres:14",
+			},
+		},
+	}
+
+	stack := sf.ToStack()
+
+	for _, res := range stack.Spec.StackResources {
+		if res.Name == "app" && res.ExecutionConfig != nil {
+			for _, ev := range res.ExecutionConfig.EnvironmentVariables {
+				if ev.Name == "DB_URL" {
+					t.Error("DB_URL should not be in execution config (handled by connection)")
+				}
 			}
-			if mappingMap["DB_PORT"] != "port" {
-				t.Errorf("expected DB_PORT→port mapping, got %v", mappingMap)
+		}
+	}
+
+	found := false
+	for _, conn := range stack.Spec.Connections {
+		if conn.From.Type == "stack_resource" && *conn.From.Name == "db" {
+			found = true
+			m := conn.Mappings[0]
+			if m.Value.Template == nil {
+				t.Fatal("expected template value")
+			}
+			if *m.Value.Template != "postgres://user:pass@{{ host }}:5432/mydb" {
+				t.Errorf("expected template with {{ host }}, got %q", *m.Value.Template)
+			}
+			if m.Value.Values == nil {
+				t.Fatal("expected values map")
+			}
+			vals := *m.Value.Values
+			if vals["host"].Output != "host" {
+				t.Errorf("expected host output, got %q", vals["host"].Output)
 			}
 		}
 	}
@@ -274,8 +321,8 @@ func TestToStack_MultipleResourceRefs(t *testing.T) {
 			"app": {
 				Image: "myapp:latest",
 				Env: map[string]string{
-					"DB_HOST":    "{{ db.host }}",
-					"REDIS_HOST": "{{ redis.host }}",
+					"DB_HOST":   "{{ db.host }}",
+					"REDIS_URL": "redis://{{ redis.host }}:6379",
 				},
 			},
 			"db":    {Image: "postgres:14"},
@@ -319,7 +366,7 @@ func TestToStack_Secrets(t *testing.T) {
 
 	found := false
 	for _, conn := range stack.Spec.Connections {
-		if conn.Kind == "env" && conn.From.Type == "secret" && *conn.From.Id == "my-secret-id" {
+		if conn.Kind == "env" && conn.From.Type == "secret" && *conn.From.Name == "my-secret-id" {
 			found = true
 			if *conn.To.Name != "app" {
 				t.Errorf("expected target 'app', got %q", *conn.To.Name)
@@ -495,29 +542,31 @@ func TestToStack_FullInfisicalExample(t *testing.T) {
 			"infisical": {
 				Image: "infisical/infisical:latest",
 				Ports: []PortDef{
-					{Name: "http", Port: 80, Public: true, Subdomain: "infisical"},
+					{Name: "http", Port: 8080, Protocol: "HTTP", Public: true, Subdomain: "infisical"},
 				},
 				Env: map[string]string{
-					"SITE_URL":       "{{ self.public.http.url }}",
-					"DB_HOST":        "{{ db.host }}",
-					"DB_PORT":        "{{ db.port }}",
-					"REDIS_HOST":     "{{ redis.host }}",
-					"ENCRYPTION_KEY": "my-secret-key",
+					"SITE_URL":           "{{ self.public.http.url }}",
+					"DB_CONNECTION_URI":  "postgres://infisical:infisical@{{ db.host }}:5432/infisical",
+					"REDIS_URL":          "redis://{{ redis.host }}:6379",
+					"ENCRYPTION_KEY":     "6c1fe4e407b8911c104518103505b218",
+					"POSTGRES_USER":      "infisical",
+					"POSTGRES_PASSWORD":  "infisical",
+					"POSTGRES_DB":        "infisical",
 				},
 				DependsOn: []string{"db", "redis"},
 			},
 			"db": {
 				Image:    "postgres:14-alpine",
 				Ports:    []PortDef{{Name: "postgres", Port: 5432, Protocol: "TCP"}},
-				Env:      map[string]string{"POSTGRES_DB": "infisical"},
+				Env:      map[string]string{"POSTGRES_USER": "infisical", "POSTGRES_PASSWORD": "infisical", "POSTGRES_DB": "infisical"},
 				Volumes:  []VolumeMountDef{{Name: "pg-data", Path: "/var/lib/postgresql/data"}},
 				Stateful: true,
 			},
 			"redis": {
-				Image:    "redis:latest",
-				Ports:    []PortDef{{Name: "redis", Port: 6379, Protocol: "TCP"}},
-				Volumes:  []VolumeMountDef{{Name: "redis-data", Path: "/data"}},
-				Stateful: true,
+				Image:   "redis:latest",
+				Ports:   []PortDef{{Name: "redis", Port: 6379, Protocol: "TCP"}},
+				Env:     map[string]string{"ALLOW_EMPTY_PASSWORD": "yes"},
+				Volumes: []VolumeMountDef{{Name: "redis-data", Path: "/data"}},
 			},
 		},
 		Volumes: map[string]VolumeDef{
@@ -538,13 +587,20 @@ func TestToStack_FullInfisicalExample(t *testing.T) {
 		t.Errorf("expected 2 volumes, got %d", len(stack.Spec.Volumes))
 	}
 
-	// Should have connections: db→infisical (env), redis→infisical (env), 2x volume_mount
 	envConns := 0
 	volConns := 0
 	for _, conn := range stack.Spec.Connections {
 		switch conn.Kind {
 		case "env":
 			envConns++
+			// Verify template-based connections
+			if conn.From.Type == "stack_resource" {
+				for _, m := range conn.Mappings {
+					if m.Value.Template == nil {
+						t.Errorf("expected template for env connection from %s", *conn.From.Name)
+					}
+				}
+			}
 		case "volume_mount":
 			volConns++
 		}
@@ -556,18 +612,20 @@ func TestToStack_FullInfisicalExample(t *testing.T) {
 		t.Errorf("expected 2 volume_mount connections, got %d", volConns)
 	}
 
-	// Infisical resource should have SITE_URL as self output and ENCRYPTION_KEY as literal
 	for _, res := range stack.Spec.StackResources {
 		if res.Name == "infisical" && res.ExecutionConfig != nil {
 			envMap := envVarsToMap(res.ExecutionConfig.EnvironmentVariables)
 			if v, ok := envMap["SITE_URL"]; !ok || v.SelfOutput == nil {
 				t.Error("expected SITE_URL as self output")
 			}
-			if v, ok := envMap["ENCRYPTION_KEY"]; !ok || *v.Value != "my-secret-key" {
+			if v, ok := envMap["ENCRYPTION_KEY"]; !ok || *v.Value != "6c1fe4e407b8911c104518103505b218" {
 				t.Error("expected ENCRYPTION_KEY as literal")
 			}
-			if _, ok := envMap["DB_HOST"]; ok {
-				t.Error("DB_HOST should not be in execution config (handled by connection)")
+			if _, ok := envMap["DB_CONNECTION_URI"]; ok {
+				t.Error("DB_CONNECTION_URI should not be in execution config (handled by connection)")
+			}
+			if _, ok := envMap["REDIS_URL"]; ok {
+				t.Error("REDIS_URL should not be in execution config (handled by connection)")
 			}
 		}
 	}
@@ -610,7 +668,7 @@ func TestToStack_MultipleSecrets(t *testing.T) {
 		if conn.From.Type != "secret" {
 			continue
 		}
-		switch *conn.From.Id {
+		switch *conn.From.Name {
 		case "db-creds":
 			if len(conn.Mappings) != 2 {
 				t.Errorf("db-creds: expected 2 mappings, got %d", len(conn.Mappings))
@@ -620,7 +678,7 @@ func TestToStack_MultipleSecrets(t *testing.T) {
 				t.Errorf("api-keys: expected 2 mappings, got %d", len(conn.Mappings))
 			}
 		default:
-			t.Errorf("unexpected secret id: %s", *conn.From.Id)
+			t.Errorf("unexpected secret name: %s", *conn.From.Name)
 		}
 		if conn.To.Type != "stack_resource" || *conn.To.Name != "app" {
 			t.Errorf("expected target app, got %s/%v", conn.To.Type, conn.To.Name)
@@ -651,7 +709,7 @@ func TestToStack_SecretOnMultipleResources(t *testing.T) {
 
 	targets := make(map[string]bool)
 	for _, conn := range stack.Spec.Connections {
-		if conn.From.Type == "secret" && *conn.From.Id == "shared-creds" {
+		if conn.From.Type == "secret" && *conn.From.Name == "shared-creds" {
 			targets[*conn.To.Name] = true
 		}
 	}

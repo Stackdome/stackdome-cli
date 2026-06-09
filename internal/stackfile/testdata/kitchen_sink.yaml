@@ -11,7 +11,7 @@ resources:
     env:
       SITE_URL: "{{ self.public.http.url }}"
       CACHE_HOST: "{{ redis.host }}"
-      CACHE_PORT: "{{ redis.port }}"
+      CACHE_URL: "redis://{{ redis.host }}:6379"
       LOG_LEVEL: info
     secrets:
       jwt-secret:
@@ -43,7 +43,7 @@ resources:
     image: api:latest
     env:
       ROLE: worker
-      CACHE_HOST: "{{ redis.host }}"
+      CACHE_URL: "redis://{{ redis.host }}:6379"
     secrets:
       jwt-secret:
         JWT_SECRET: jwt_signing_key

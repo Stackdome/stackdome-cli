@@ -5,10 +5,19 @@ import (
 	"strings"
 
 	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	"github.com/samber/lo"
 	"k8s.io/utils/ptr"
 )
 
-var envRefPattern = regexp.MustCompile(`\{\{\s*(\w+)\.(\S+)\s*\}\}`)
+var (
+	// Matches a full-value ref: the entire string is {{ source.output }}
+	exactRefPattern = regexp.MustCompile(`^\{\{\s*([\w-]+(?:\.[\w-]+)+)\s*\}\}$`)
+	// Matches embedded refs within a larger string
+	embeddedRefPattern = regexp.MustCompile(`\{\{\s*([\w-]+(?:\.[\w-]+)+)\s*\}\}`)
+	// addonVarPattern matches {{ varname }} in addon env templates.
+	// Addon vars are plain output names (host, port, username) — no source prefix.
+	addonVarPattern = regexp.MustCompile(`\{\{\s*([\w-]+)\s*\}\}`)
+)
 
 func (sf *Stackfile) ToStack() openapi.Stack {
 	spec := openapi.StackSpec{
@@ -130,20 +139,17 @@ func buildExecutionConfig(env map[string]string) *openapi.ExecutionConfig {
 	var envVars []openapi.EnvVar
 	for name, value := range env {
 		ev := openapi.EnvVar{Name: name}
-
-		if strings.HasPrefix(value, "{{ self.") && strings.HasSuffix(value, " }}") {
-			output := strings.TrimPrefix(value, "{{ self.")
-			output = strings.TrimSuffix(output, " }}")
-			output = strings.TrimSpace(output)
+		switch {
+		case isSelfRef(value):
+			output := extractSelfOutput(value)
 			ev.SelfOutput = ptr.To(output)
-		} else if !envRefPattern.MatchString(value) {
+		case hasResourceRef(value):
+			// skip for now, will be handled in connections
+			continue
+		default:
 			ev.Value = ptr.To(value)
 		}
-		// {{ resource.output }} refs are handled via connections, skip here
-
-		if ev.Value != nil || ev.SelfOutput != nil {
-			envVars = append(envVars, ev)
-		}
+		envVars = append(envVars, ev)
 	}
 
 	if len(envVars) == 0 {
@@ -152,6 +158,87 @@ func buildExecutionConfig(env map[string]string) *openapi.ExecutionConfig {
 	return &openapi.ExecutionConfig{
 		EnvironmentVariables: envVars,
 	}
+}
+
+type envRef struct {
+	Source   string
+	Output   string
+	RawMatch string // the exact substring matched, e.g. "{{ redis.host }}"
+}
+
+// FindAllStringSubmatch returns a [][]string — a slice of matches, where each match is a slice of strings.
+
+//   For the regex \{\{\s*([\w-]+(?:\.[\w-]+)+)\s*\}\}:
+//   - [i][0] = the full match (including {{ }})
+//   - [i][1] = the first capture group (the content inside)
+
+//   Example with one ref:
+
+//   Input: "redis://{{ redis.host }}:6379"
+
+//   Returns:
+//   [
+//     ["{{ redis.host }}", "redis.host"],
+//   ]
+
+//   Example with two refs:
+
+//   Input: "{{ db.host }}:{{ db.port.postgres }}"
+
+//   Returns:
+//   [
+//     ["{{ db.host }}", "db.host"],
+//     ["{{ db.port.postgres }}", "db.port.postgres"],
+//   ]
+
+func findRefs(value string) []envRef {
+	matches := embeddedRefPattern.FindAllStringSubmatch(value, -1)
+	var refs []envRef
+	for _, m := range matches {
+		parts := strings.SplitN(m[1], ".", 2)
+		if len(parts) == 2 {
+			refs = append(refs, envRef{Source: parts[0], Output: parts[1], RawMatch: m[0]})
+		}
+	}
+	return refs
+}
+
+func isExactRef(value string) bool {
+	return exactRefPattern.MatchString(value)
+}
+
+func isSelfRef(value string) bool {
+	refs := findRefs(value)
+	for _, r := range refs {
+		if r.Source == "self" {
+			return true
+		}
+	}
+	return false
+}
+
+func extractSelfOutput(value string) string {
+	refs := findRefs(value)
+	for _, r := range refs {
+		if r.Source == "self" {
+			return r.Output
+		}
+	}
+	return ""
+}
+
+func hasResourceRef(value string) bool {
+	refs := findRefs(value)
+	for _, r := range refs {
+		if r.Source != "self" {
+			return true
+		}
+	}
+	return false
+}
+
+func outputToVarName(output string) string {
+	return strings.ReplaceAll(output, ".", "_")
 }
 
 func buildVolumeMounts(mounts []VolumeMountDef) []openapi.VolumeMount {
@@ -208,23 +295,53 @@ func buildEnvRefConnections(targetResource string, env map[string]string) []open
 	grouped := make(map[string][]openapi.ConnectionMapping)
 
 	for envName, value := range env {
-		matches := envRefPattern.FindStringSubmatch(value)
-		if matches == nil || matches[1] == "self" {
+		refsInCurrentEnv := findRefs(value)
+		if len(refsInCurrentEnv) == 0 {
 			continue
 		}
 
-		source := matches[1]
-		output := matches[2]
+		_, currentEnvIsSelfRef := lo.Find(refsInCurrentEnv, func(r envRef) bool { return r.Source == "self" })
+		if currentEnvIsSelfRef {
+			// skip self refs, they will be handled in execution config
+			continue
+		}
+
+		source := refsInCurrentEnv[0].Source
+
+		var vr openapi.ValueRef
+		if isExactRef(value) && len(refsInCurrentEnv) == 1 {
+			// Output will be the the string inside {{ }}, e.g. "redis.host"
+			vr.Output = ptr.To(refsInCurrentEnv[0].Output)
+		} else {
+			// Templated value, e.g. "redis://{{ redis.host }}:6379"
+			tmpl := value
+			// Extract each of the interpolated refs and add them to a map of variable name -> output ref,
+			// which will be used to replace the {{ }} with {{ varName }} in the template.
+			// E.g. for "redis://{{ redis.host }}:{{ redis.port }}" we would create a
+			// map: {"redis_host": {Output: "redis.host"}, "redis_port": {Output: "redis.port"}}
+			// and the template would become "redis://{{ redis_host }}:{{ redis_port }}"
+			values := make(map[string]openapi.OutputValueRef)
+			for _, r := range refsInCurrentEnv {
+				// convert interpolated var name to a valid env var name by replacing dots with underscores
+				varName := outputToVarName(r.Output)
+				// replace the original {{ redis.host }} with {{ redis_host }} in the template
+				tmpl = strings.Replace(tmpl, r.RawMatch, "{{ "+varName+" }}", 1)
+				// add to values map: "redis_host" -> {Output: "redis.host"}
+				values[varName] = openapi.OutputValueRef{Output: r.Output}
+			}
+			vr.Template = ptr.To(tmpl)
+			vr.Values = &values
+		}
 
 		mapping := openapi.ConnectionMapping{
 			Target: openapi.ConnectionTarget{
 				Type: "env",
 				Name: ptr.To(envName),
 			},
-			Value: openapi.ValueRef{
-				Output: ptr.To(output),
-			},
+			Value: vr,
 		}
+		// For each source (e.g. "redis"), we can have multiple env vars referencing it,
+		// so we group by source and create one connection per source with multiple mappings
 		grouped[source] = append(grouped[source], mapping)
 	}
 
@@ -250,7 +367,7 @@ func buildEnvRefConnections(targetResource string, env map[string]string) []open
 func buildSecretConnections(targetResource string, secrets map[string]SecretMapping) []openapi.StackConnection {
 	var connections []openapi.StackConnection
 
-	for secretID, mapping := range secrets {
+	for secretName, mapping := range secrets {
 		var mappings []openapi.ConnectionMapping
 		for envName, secretKey := range mapping {
 			mappings = append(mappings, openapi.ConnectionMapping{
@@ -268,7 +385,7 @@ func buildSecretConnections(targetResource string, secrets map[string]SecretMapp
 			Kind: "env",
 			From: openapi.TopologyNodeRef{
 				Type: "secret",
-				Id:   ptr.To(secretID),
+				Name: ptr.To(secretName),
 			},
 			To: openapi.TopologyNodeRef{
 				Type: "stack_resource",
@@ -284,57 +401,21 @@ func buildSecretConnections(targetResource string, secrets map[string]SecretMapp
 func buildAddonConnections(targetResource string, addons map[string]AddonConnectionConfig) []openapi.StackConnection {
 	var connections []openapi.StackConnection
 
-	for addonID, addon := range addons {
-		var mappings []openapi.ConnectionMapping
-		for envName, tmpl := range addon.Env {
-			vr := openapi.ValueRef{}
-			if strings.Contains(tmpl, "{{") {
-				vr.Template = ptr.To(tmpl)
-				values := extractTemplateVars(tmpl)
-				if len(values) > 0 {
-					vr.Values = &values
-				}
-			} else {
-				vr.Output = ptr.To(tmpl)
-			}
+	for addonName, addon := range addons {
+		mappings := buildAddonMappings(addon.Env)
 
-			mappings = append(mappings, openapi.ConnectionMapping{
-				Target: openapi.ConnectionTarget{
-					Type: "env",
-					Name: ptr.To(envName),
-				},
-				Value: vr,
-			})
-		}
-
-		fromType := "addon/" + addon.Type
 		conn := openapi.StackConnection{
 			Kind: "env",
 			From: openapi.TopologyNodeRef{
-				Type: fromType,
-				Id:   ptr.To(addonID),
+				Type: "addon/" + addon.Type,
+				Name: ptr.To(addonName),
 			},
 			To: openapi.TopologyNodeRef{
 				Type: "stack_resource",
 				Name: ptr.To(targetResource),
 			},
 			Mappings: mappings,
-		}
-
-		if addon.Postgres != nil {
-			pg := addon.Postgres
-			if pg.Database != "" || pg.Superuser {
-				pgConfig := &openapi.PostgresEnvConfig{}
-				if pg.Database != "" {
-					pgConfig.Database = ptr.To(pg.Database)
-				}
-				if pg.Superuser {
-					pgConfig.Superuser = ptr.To(true)
-				}
-				conn.Config = &openapi.StackConnectionConfig{
-					PostgresEnvConfig: pgConfig,
-				}
-			}
+			Config:   buildAddonConfig(addon),
 		}
 
 		connections = append(connections, conn)
@@ -342,19 +423,67 @@ func buildAddonConnections(targetResource string, addons map[string]AddonConnect
 	return connections
 }
 
-var templateVarPattern = regexp.MustCompile(`\{\{\s*(\w+)\s*\}\}`)
+type addonRef struct {
+	Output   string
+	RawMatch string
+}
 
-func extractTemplateVars(tmpl string) map[string]openapi.OutputValueRef {
-	matches := templateVarPattern.FindAllStringSubmatch(tmpl, -1)
-	if len(matches) == 0 {
+func findAddonRefs(value string) []addonRef {
+	matches := addonVarPattern.FindAllStringSubmatch(value, -1)
+	var refs []addonRef
+	for _, m := range matches {
+		refs = append(refs, addonRef{Output: m[1], RawMatch: m[0]})
+	}
+	return refs
+}
+
+func buildAddonMappings(env map[string]string) []openapi.ConnectionMapping {
+	var mappings []openapi.ConnectionMapping
+	for envName, envValue := range env {
+		refs := findAddonRefs(envValue)
+
+		var vr openapi.ValueRef
+		switch {
+		case len(refs) == 1 && refs[0].RawMatch == envValue:
+			vr.Output = ptr.To(refs[0].Output)
+		default:
+			values := make(map[string]openapi.OutputValueRef)
+			for _, r := range refs {
+				values[r.Output] = openapi.OutputValueRef{Output: r.Output}
+			}
+			vr.Template = ptr.To(envValue)
+			vr.Values = &values
+		}
+
+		mappings = append(mappings, openapi.ConnectionMapping{
+			Target: openapi.ConnectionTarget{
+				Type: "env",
+				Name: ptr.To(envName),
+			},
+			Value: vr,
+		})
+	}
+	return mappings
+}
+
+func buildAddonConfig(addon AddonConnectionConfig) *openapi.StackConnectionConfig {
+	if addon.Postgres == nil {
 		return nil
 	}
-	values := make(map[string]openapi.OutputValueRef)
-	for _, m := range matches {
-		varName := m[1]
-		values[varName] = openapi.OutputValueRef{Output: varName}
+	pg := addon.Postgres
+	if pg.Database == "" && !pg.Superuser {
+		return nil
 	}
-	return values
+	pgConfig := &openapi.PostgresEnvConfig{}
+	if pg.Database != "" {
+		pgConfig.Database = ptr.To(pg.Database)
+	}
+	if pg.Superuser {
+		pgConfig.Superuser = ptr.To(true)
+	}
+	return &openapi.StackConnectionConfig{
+		PostgresEnvConfig: pgConfig,
+	}
 }
 
 func buildVolumeMountConnections(targetResource string, mounts []VolumeMountDef) []openapi.StackConnection {
