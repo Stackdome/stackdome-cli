@@ -146,7 +146,7 @@ func WrapError(httpResp *http.Response, err error, message string) error {
 	if isTimeoutError(err) {
 		return clierrors.Wrapf(err, "%s: request timed out", message)
 	}
-	return clierrors.Wrapf(err, message)
+	return clierrors.Wrapf(err, "%s", message)
 }
 
 func extractAPIReason(err error) string {

@@ -62,6 +62,16 @@ func (c *Client) GetStackResources(ctx context.Context, stackID string) ([]opena
 	return resp.Items, nil
 }
 
+func (c *Client) RestartResource(ctx context.Context, stackID, resourceName string) (*openapi.StackResource, error) {
+	resp, httpResp, err := c.apiClient.DefaultApi.
+		ApiV1OrganizationsOrgIdTeamsTeamNameStacksIdResourcesResourceNameActionsRestartPost(ctx, c.orgID, c.teamName, stackID, resourceName).
+		Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to restart resource")
+	}
+	return resp, nil
+}
+
 func (c *Client) FindStackByName(ctx context.Context, name string) (*openapi.Stack, error) {
 	stacks, err := c.ListStacks(ctx)
 	if err != nil {

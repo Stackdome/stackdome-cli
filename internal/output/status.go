@@ -186,7 +186,7 @@ func conditionRow(c openapi.Condition) []string {
 		message = *c.Message
 	}
 	if c.LastTransitionTime != nil {
-		age = Dim(timeAgo(*c.LastTransitionTime))
+		age = Dim(TimeAgo(*c.LastTransitionTime))
 	}
 	return []string{status, condType, reason, message, age}
 }
@@ -252,7 +252,7 @@ func formatURL(res *openapi.StackResource) string {
 	return strings.Join(urls, ", ")
 }
 
-func timeAgo(t time.Time) string {
+func TimeAgo(t time.Time) string {
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
