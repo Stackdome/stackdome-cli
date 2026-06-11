@@ -68,6 +68,8 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newOpenCmd())
 	rootCmd.AddCommand(newSecretCmd())
 	rootCmd.AddCommand(newVolumeCmd())
+	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newCompletionCmd())
 
 	return rootCmd
 }

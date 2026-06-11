@@ -64,16 +64,3 @@ func newLogsCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveStackID(ctx *cmdutil.CommandContext, cmd *cobra.Command, flagStack string) (string, error) {
-	if flagStack != "" {
-		s, err := ctx.Client.FindStackByName(cmd.Context(), flagStack)
-		if err != nil {
-			return "", err
-		}
-		if s == nil {
-			return "", clierrors.NotFoundError("Stack", flagStack)
-		}
-		return *s.Id, nil
-	}
-	return ctx.Config.RequireStack()
-}

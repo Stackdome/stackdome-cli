@@ -11,6 +11,7 @@ require (
 	github.com/gofrs/flock v0.8.1
 	github.com/hashicorp/go-envparse v0.1.0
 	github.com/hashicorp/go-getter v1.7.4
+	github.com/joho/godotenv v1.5.1
 	github.com/samber/lo v1.53.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.2

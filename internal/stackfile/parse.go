@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joho/godotenv"
 	clierrors "github.com/stackdome/cli/internal/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +18,40 @@ func Load(path string) (*Stackfile, error) {
 	default:
 		return nil, clierrors.ValidationError("Unsupported file format: " + ext + " (expected .yaml or .yml)")
 	}
+}
+
+func ResolveEnvFiles(sf *Stackfile, baseDir string) error {
+	for name, res := range sf.Resources {
+		if res.EnvFile == "" {
+			continue
+		}
+		envPath := res.EnvFile
+		if !filepath.IsAbs(envPath) {
+			envPath = filepath.Join(baseDir, envPath)
+		}
+		fileEnv, err := loadEnvFile(envPath)
+		if err != nil {
+			return clierrors.Wrapf(err, "Failed to read env_file for resource %q", name)
+		}
+		if res.Env == nil {
+			res.Env = make(map[string]string)
+		}
+		for k, v := range fileEnv {
+			if v == "" {
+				continue
+			}
+			if _, exists := res.Env[k]; !exists {
+				res.Env[k] = v
+			}
+		}
+		sf.Resources[name] = res
+	}
+
+	return nil
+}
+
+func loadEnvFile(path string) (map[string]string, error) {
+	return godotenv.Read(path)
 }
 
 func loadYAML(path string) (*Stackfile, error) {
@@ -33,14 +68,14 @@ func loadYAML(path string) (*Stackfile, error) {
 		return nil, clierrors.Wrapf(err, "Failed to parse stackfile: %s", path)
 	}
 
-	if err := validate(&sf); err != nil {
+	if err := Validate(&sf); err != nil {
 		return nil, err
 	}
 
 	return &sf, nil
 }
 
-func validate(sf *Stackfile) error {
+func Validate(sf *Stackfile) error {
 	if sf.Name == "" {
 		return clierrors.ValidationError("Stackfile missing required field: name")
 	}

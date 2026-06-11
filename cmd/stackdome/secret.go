@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
 	clierrors "github.com/stackdome/cli/internal/errors"
@@ -266,26 +266,15 @@ func collectSecretData(dataFlags []string, fromFile string) ([]openapi.SecretDat
 }
 
 func parseEnvFile(path string) ([]openapi.SecretData, error) {
-	f, err := os.Open(path)
+	env, err := godotenv.Read(path)
 	if err != nil {
 		return nil, clierrors.Wrapf(err, "Failed to read file %q", path)
 	}
-	defer f.Close()
-
 	var data []openapi.SecretData
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, clierrors.ValidationError(fmt.Sprintf("invalid line in %q: %q (expected KEY=VALUE)", path, line))
-		}
+	for key, value := range env {
 		data = append(data, openapi.SecretData{Key: key, Value: value})
 	}
-	return data, scanner.Err()
+	return data, nil
 }
 
 func secretKeys(s openapi.Secret) string {

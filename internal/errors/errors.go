@@ -112,7 +112,7 @@ func FromHTTP(statusCode int, body string) *CLIError {
 		e.Code = "AUTH_EXPIRED"
 		e.ExitCode = ExitAuth
 	case statusCode == 403:
-		e.Message = "Permission denied"
+		e.Message = "Permission denied. Your session may have expired — run `stackdome login` to re-authenticate."
 		e.Code = "FORBIDDEN"
 		e.ExitCode = ExitAuth
 	case statusCode == 404:

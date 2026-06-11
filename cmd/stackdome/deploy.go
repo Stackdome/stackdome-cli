@@ -19,6 +19,7 @@ func newDeployCmd() *cobra.Command {
 	var (
 		flagFile string
 		flagName string
+		flagWait bool
 	)
 
 	cmd := &cobra.Command{
@@ -51,23 +52,34 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Waiting for stack to be ready...\n")
-			final, err := waitForStack(ctx, cmd, *result.Id)
-			if err != nil {
-				return err
+			if flagWait {
+				spin := output.NewSpinner("Waiting for stack to be ready...")
+				spin.Start()
+				final, err := waitForStack(ctx, cmd, *result.Id)
+				spin.Stop()
+				if err != nil {
+					return err
+				}
+
+				if !ctx.Formatter.IsTable() {
+					return ctx.Formatter.PrintStructured(final)
+				}
+
+				output.RenderStackStatus(os.Stdout, final, false)
+				return nil
 			}
 
-			if !ctx.Formatter.IsTable() {
-				return ctx.Formatter.PrintStructured(final)
-			}
-
-			output.RenderStackStatus(os.Stdout, final, false)
+			fmt.Fprintf(os.Stderr, "\nStack %q submitted. Track progress with:\n", result.Name)
+			fmt.Fprintf(os.Stderr, "  stackdome status          # current state\n")
+			fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")
+			fmt.Fprintf(os.Stderr, "  stackdome logs            # stream logs\n")
 			return nil
 		})),
 	}
 
 	cmd.Flags().StringVarP(&flagFile, "file", "f", "stackfile.yaml", "Path to stackfile or stack JSON")
 	cmd.Flags().StringVar(&flagName, "name", "", "Override stack name")
+	cmd.Flags().BoolVarP(&flagWait, "wait", "w", false, "Wait for stack to be ready")
 
 	return cmd
 }
@@ -89,6 +101,9 @@ func loadStack(path, nameOverride string) (*openapi.Stack, error) {
 	case ".yaml", ".yml":
 		sf, err := stackfile.Load(path)
 		if err != nil {
+			return nil, err
+		}
+		if err := stackfile.ResolveEnvFiles(sf, filepath.Dir(path)); err != nil {
 			return nil, err
 		}
 		if nameOverride != "" {

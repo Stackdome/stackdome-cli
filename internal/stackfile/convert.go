@@ -52,7 +52,7 @@ func (sf *Stackfile) buildResources() []openapi.StackResource {
 		}
 
 		sr.Ports = buildPorts(res.Ports)
-		sr.ExecutionConfig = buildExecutionConfig(res.Env)
+		sr.ExecutionConfig = buildExecutionConfig(res.Env, res.Command, res.Args)
 		sr.VolumeMounts = buildVolumeMounts(res.Volumes)
 
 		resources = append(resources, sr)
@@ -131,9 +131,18 @@ func buildPorts(ports []PortDef) []openapi.Port {
 	return out
 }
 
-func buildExecutionConfig(env map[string]string) *openapi.ExecutionConfig {
-	if len(env) == 0 {
+func buildExecutionConfig(env map[string]string, command, args []string) *openapi.ExecutionConfig {
+	if len(env) == 0 && len(command) == 0 && len(args) == 0 {
 		return nil
+	}
+
+	cfg := &openapi.ExecutionConfig{}
+
+	if len(command) > 0 {
+		cfg.Command = command
+	}
+	if len(args) > 0 {
+		cfg.Args = args
 	}
 
 	var envVars []openapi.EnvVar
@@ -144,7 +153,6 @@ func buildExecutionConfig(env map[string]string) *openapi.ExecutionConfig {
 			output := extractSelfOutput(value)
 			ev.SelfOutput = ptr.To(output)
 		case hasResourceRef(value):
-			// skip for now, will be handled in connections
 			continue
 		default:
 			ev.Value = ptr.To(value)
@@ -152,12 +160,11 @@ func buildExecutionConfig(env map[string]string) *openapi.ExecutionConfig {
 		envVars = append(envVars, ev)
 	}
 
-	if len(envVars) == 0 {
-		return nil
+	if len(envVars) > 0 {
+		cfg.EnvironmentVariables = envVars
 	}
-	return &openapi.ExecutionConfig{
-		EnvironmentVariables: envVars,
-	}
+
+	return cfg
 }
 
 type envRef struct {

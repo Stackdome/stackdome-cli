@@ -13,10 +13,13 @@ type Stackfile struct {
 }
 
 type Resource struct {
-	Image string            `yaml:"image,omitempty"`
-	Build *BuildConfig      `yaml:"build,omitempty"`
-	Ports []PortDef         `yaml:"ports,omitempty"`
-	Env   map[string]string `yaml:"env,omitempty"`
+	Image   string            `yaml:"image,omitempty"`
+	Build   *BuildConfig      `yaml:"build,omitempty"`
+	Command []string          `yaml:"command,omitempty"`
+	Args    []string          `yaml:"args,omitempty"`
+	Ports   []PortDef         `yaml:"ports,omitempty"`
+	EnvFile string            `yaml:"env_file,omitempty"`
+	Env     map[string]string `yaml:"env,omitempty"`
 	// Secret Name -> Mapping of secret keys to env var names
 	Secrets map[string]SecretMapping `yaml:"secrets,omitempty"`
 	// Addon Name -> Connection Config
@@ -27,7 +30,7 @@ type Resource struct {
 }
 
 type BuildConfig struct {
-	Repo       string `yaml:"repo"`
+	Repo       string `yaml:"repo,omitempty"`
 	Branch     string `yaml:"branch,omitempty"`
 	Tag        string `yaml:"tag,omitempty"`
 	Commit     string `yaml:"commit,omitempty"`
