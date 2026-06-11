@@ -149,16 +149,28 @@ func WrapError(httpResp *http.Response, err error, message string) error {
 	return clierrors.Wrapf(err, "%s", message)
 }
 
+type bodyer interface {
+	Body() []byte
+}
+
 func extractAPIReason(err error) string {
 	if err == nil {
 		return ""
 	}
-	body := err.Error()
+
+	var sources [][]byte
+	if b, ok := err.(bodyer); ok {
+		sources = append(sources, b.Body())
+	}
+	sources = append(sources, []byte(err.Error()))
+
 	var apiErr struct {
 		Reason string `json:"reason"`
 	}
-	if json.Unmarshal([]byte(body), &apiErr) == nil && apiErr.Reason != "" {
-		return apiErr.Reason
+	for _, src := range sources {
+		if json.Unmarshal(src, &apiErr) == nil && apiErr.Reason != "" {
+			return apiErr.Reason
+		}
 	}
 	return ""
 }

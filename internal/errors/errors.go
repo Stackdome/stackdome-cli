@@ -123,6 +123,13 @@ func FromHTTP(statusCode int, body string) *CLIError {
 		e.Message = "Conflict"
 		e.Code = "CONFLICT"
 		e.ExitCode = ExitConflict
+	case statusCode == 400:
+		e.Message = body
+		if e.Message == "" {
+			e.Message = "Invalid request"
+		}
+		e.Code = "VALIDATION_ERROR"
+		e.ExitCode = ExitValidation
 	case statusCode >= 500:
 		e.Message = "Server error — try again later"
 		e.Code = "SERVER_ERROR"
