@@ -182,7 +182,7 @@ func renderBuildInfo(b *openapi.ImageBuild) {
 	}
 
 	if start := buildStartTime(*b); start != nil {
-		fmt.Printf("Started:   %s\n", start.Format(time.DateTime))
+		fmt.Printf("Started:   %s\n", start.Local().Format(time.RFC3339))
 	}
 
 	fmt.Printf("Duration:  %s\n", buildDuration(*b))

@@ -112,7 +112,8 @@ func TestBuildDurationConditionFallback(t *testing.T) {
 
 func TestBuildDurationInProgressShowsElapsed(t *testing.T) {
 	b := buildWith("Building", []openapi.Condition{
-		cond("BuildJobCreated", time.Now().Add(-90*time.Second)),
+		// mid-bucket offset so rounding can't tip either way while the test runs
+		cond("BuildJobCreated", time.Now().Add(-90*time.Second-250*time.Millisecond)),
 	})
 	if d := buildDuration(b); d != "1m30s" {
 		t.Errorf("duration = %q, want %q", d, "1m30s")
