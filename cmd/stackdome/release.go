@@ -158,13 +158,13 @@ func newReleaseEventsCmd() *cobra.Command {
 						streamErr = clierrors.New(e.Data)
 						continue
 					}
-					// Structured mode streams the raw event payloads as
-					// newline-delimited JSON; the human formatter would put
-					// prose and ANSI colour on stdout.
+					// Structured mode streams newline-delimited JSON envelopes;
+					// the human formatter would put prose and ANSI colour on
+					// stdout.
 					if ctx.Formatter.IsTable() {
 						printReleaseEventLine(os.Stdout, e)
 					} else {
-						fmt.Fprintln(os.Stdout, e.Data)
+						fmt.Fprintf(os.Stdout, "{\"event\":%q,\"data\":%s}\n", e.Event, eventDataJSON(e.Data))
 					}
 				}
 				return streamErr
@@ -214,6 +214,19 @@ func renderReleaseInfo(r *openapi.StackReleaseDetail) {
 // printReleaseEventLine renders one streamed SSE frame. The payload is a
 // ReleaseEvent JSON document; anything unparseable is printed raw so nothing is
 // silently swallowed.
+// eventDataJSON embeds an SSE payload as-is when it is already JSON, and as a
+// JSON string when it is not, so every streamed line stays valid JSON.
+func eventDataJSON(data string) string {
+	if json.Valid([]byte(data)) {
+		return data
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
+}
+
 func printReleaseEventLine(w io.Writer, e client.SSEEvent) {
 	if e.Event == "error" {
 		fmt.Fprintf(w, "%s %s\n", output.Red("error"), e.Data)

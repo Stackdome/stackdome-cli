@@ -65,17 +65,25 @@ func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string
 			return err
 		}
 
-		live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
-		if err != nil {
-			return err
-		}
+		// Structured mode emits one object per tick — no redraw, no escape
+		// codes, so `status -w -o json` stays parseable as it streams.
+		if !ctx.Formatter.IsTable() {
+			if err := ctx.Formatter.PrintStructured(stack); err != nil {
+				return err
+			}
+		} else {
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
 
-		// Clear screen — only meaningful on a terminal; escape codes would
-		// otherwise corrupt piped/redirected output.
-		if output.IsTTY() {
-			os.Stdout.WriteString("\033[2J\033[H")
+			// Clear screen — only meaningful on a terminal; escape codes would
+			// otherwise corrupt piped/redirected output.
+			if output.IsTTY() {
+				os.Stdout.WriteString("\033[2J\033[H")
+			}
+			output.RenderStackStatus(os.Stdout, stack, live, showConditions)
 		}
-		output.RenderStackStatus(os.Stdout, stack, live, showConditions)
 
 		select {
 		case <-cmd.Context().Done():

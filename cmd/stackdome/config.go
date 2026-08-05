@@ -27,12 +27,29 @@ func newConfigViewCmd() *cobra.Command {
 		Short: "Show current configuration",
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if !ctx.Formatter.IsTable() {
-				return ctx.Formatter.PrintStructured(ctx.Config)
+				// Redact on a copy: Save() marshals the same struct, so the
+				// tokens must stay intact on the real config.
+				view := *ctx.Config
+				view.AccessToken = redactSecret(view.AccessToken)
+				view.RefreshToken = redactSecret(view.RefreshToken)
+				return ctx.Formatter.PrintStructured(view)
 			}
 			fmt.Fprintln(os.Stdout, ctx.Config.Summary())
 			return nil
 		}),
 	}
+}
+
+// redactSecret keeps enough of a credential to recognise which one is in play
+// without printing anything usable.
+func redactSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) > 8 {
+		return s[:8] + "..."
+	}
+	return "..."
 }
 
 func newConfigSetStackCmd() *cobra.Command {
