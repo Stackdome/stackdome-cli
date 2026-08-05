@@ -51,7 +51,7 @@ func resolveScope(ctx *CommandContext, cmd *cobra.Command) error {
 		ctx.Config.OrganizationID = user.GetOrganisationId()
 	}
 	if ctx.Config.ProjectName == "" {
-		name, err := ctx.Client.ResolveDefaultProject(cmd.Context())
+		name, err := ctx.Client.ResolveDefaultProject(cmd.Context(), ctx.Config.OrganizationID)
 		if err != nil {
 			return err
 		}

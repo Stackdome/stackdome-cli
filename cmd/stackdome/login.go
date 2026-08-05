@@ -68,26 +68,41 @@ func loginWithToken(cmd *cobra.Command, cfg *config.Config, serverURL, token str
 		return err
 	}
 
-	projectName, err := c.ResolveDefaultProject(cmd.Context())
-	if err != nil {
-		return err
-	}
-
 	cfg.ServerURL = serverURL
 	cfg.AccessToken = token
 	cfg.RefreshToken = ""
 	cfg.OrganizationID = user.GetOrganisationId()
-	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(user)
 	cfg.Insecure = insecure
-	cfg.AdoptEnvValues()
 
-	if err := cfg.Save(); err != nil {
+	if err := persistLogin(cmd, c, cfg); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(os.Stderr, "Logged in as %s\n", cfg.Username)
 	return nil
+}
+
+// persistLogin writes the credential before resolving the project: a project
+// lookup that fails must not throw away a token the user just obtained. Without
+// a project, commands that need one fail later with a clear message — but the
+// login itself stands.
+func persistLogin(cmd *cobra.Command, c *client.Client, cfg *config.Config) error {
+	// An explicit login always persists in full, even when the values happen to
+	// equal STACKDOME_URL / STACKDOME_TOKEN.
+	cfg.AdoptEnvValues()
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+
+	projectName, err := c.ResolveDefaultProject(cmd.Context(), cfg.OrganizationID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", clierrors.UserMessage(err))
+		return nil
+	}
+
+	cfg.ProjectName = projectName
+	return cfg.Save()
 }
 
 func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, email, password string, insecure bool) error {
@@ -105,21 +120,14 @@ func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, ema
 		return err
 	}
 
-	projectName, err := c.ResolveDefaultProject(cmd.Context())
-	if err != nil {
-		return err
-	}
-
 	cfg.ServerURL = serverURL
 	cfg.AccessToken = result.AccessToken
 	cfg.RefreshToken = result.RefreshToken
 	cfg.OrganizationID = result.User.GetOrganisationId()
-	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(result.User)
 	cfg.Insecure = insecure
-	cfg.AdoptEnvValues()
 
-	if err := cfg.Save(); err != nil {
+	if err := persistLogin(cmd, c, cfg); err != nil {
 		return err
 	}
 

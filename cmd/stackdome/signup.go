@@ -48,11 +48,6 @@ func newSignupCmd() *cobra.Command {
 				return err
 			}
 
-			projectName, err := c.ResolveDefaultProject(cmd.Context())
-			if err != nil {
-				return err
-			}
-
 			cfg, err := config.Load()
 			if err != nil {
 				return err
@@ -62,12 +57,10 @@ func newSignupCmd() *cobra.Command {
 			cfg.AccessToken = result.AccessToken
 			cfg.RefreshToken = result.RefreshToken
 			cfg.OrganizationID = result.User.GetOrganisationId()
-			cfg.ProjectName = projectName
 			cfg.Username = userDisplayName(result.User)
 			cfg.Insecure = flagInsecure
-			cfg.AdoptEnvValues()
 
-			if err := cfg.Save(); err != nil {
+			if err := persistLogin(cmd, c, cfg); err != nil {
 				return err
 			}
 
