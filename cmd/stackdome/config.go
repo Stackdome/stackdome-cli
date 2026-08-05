@@ -62,7 +62,11 @@ func newConfigSetStackCmd() *cobra.Command {
 			if err := ctx.Config.SetCurrentStack(id); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Current stack set to %s (%s)\n", args[0], id)
+			note := ""
+			if ctx.Config.TokenFromEnv() {
+				note = " — this session only, not persisted with env-token auth"
+			}
+			fmt.Fprintf(os.Stderr, "Current stack set to %s (%s)%s\n", args[0], id, note)
 			return nil
 		})),
 	}

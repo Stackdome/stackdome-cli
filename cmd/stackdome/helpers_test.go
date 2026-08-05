@@ -44,3 +44,19 @@ func TestResolveIDPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestLooksLikeUUID(t *testing.T) {
+	cases := map[string]bool{
+		"b02262ac-8e6e-45cd-b18e-acb5d3f97ce4": true,
+		"B02262AC-8E6E-45CD-B18E-ACB5D3F97CE4": true,
+		"hello-stack":                          false,
+		"":                                     false,
+		"b02262ac8e6e45cdb18eacb5d3f97ce4":     false,
+		"b02262ac-8e6e-45cd-b18e-acb5d3f97cez": false,
+	}
+	for in, want := range cases {
+		if got := looksLikeUUID(in); got != want {
+			t.Errorf("looksLikeUUID(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

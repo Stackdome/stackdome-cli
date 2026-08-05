@@ -12,7 +12,43 @@ func resolveStackID(ctx *cmdutil.CommandContext, cmd *cobra.Command, flagStack s
 	if flagStack != "" {
 		return resolveStackRef(ctx, cmd, flagStack)
 	}
-	return ctx.Config.RequireStack()
+	current, err := ctx.Config.RequireStack()
+	if err != nil {
+		return "", err
+	}
+	// Configs written before set-stack resolved its argument hold a stack name,
+	// which every API call rejects. Heal it in place on first use.
+	if looksLikeUUID(current) {
+		return current, nil
+	}
+	id, err := resolveStackRef(ctx, cmd, current)
+	if err != nil {
+		return "", err
+	}
+	_ = ctx.Config.SetCurrentStack(id)
+	return id, nil
+}
+
+// looksLikeUUID is a shape check, not validation: stack IDs are UUIDs and stack
+// names cannot contain the 8-4-4-4-12 layout, which is all we need to tell them
+// apart without a lookup.
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // resolveStackRef turns whatever the user typed — a stack name, a full ID, or

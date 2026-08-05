@@ -106,11 +106,10 @@ func TestSSEEventIsEnd(t *testing.T) {
 		event SSEEvent
 		want  bool
 	}{
-		{SSEEvent{Data: "{}"}, true},
-		{SSEEvent{Data: " {} "}, true},
-		{SSEEvent{Event: "end", Data: ""}, true},
+		{SSEEvent{Event: "end", Data: "{}"}, true},
+		{SSEEvent{Event: "end"}, true},
+		{SSEEvent{Data: "{}"}, false}, // a log line that happens to be `{}` still prints
 		{SSEEvent{Data: "[web]: hello"}, false},
-		{SSEEvent{Data: `{"msg":"hi"}`}, false},
 		{SSEEvent{Data: ""}, false},
 	}
 	for _, c := range cases {

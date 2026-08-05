@@ -78,17 +78,3 @@ func scopeError(ctx *CommandContext, err error) error {
 		WithCode("SCOPE_UNRESOLVED").
 		WithExitCode(clierrors.ExitAuth)
 }
-
-func RequireStack(fn func(ctx *CommandContext, cmd *cobra.Command, args []string, stackName string) error) RunEWithContext {
-	return func(ctx *CommandContext, cmd *cobra.Command, args []string) error {
-		stackName, _ := cmd.Flags().GetString("stack")
-		if stackName == "" {
-			var err error
-			stackName, err = ctx.Config.RequireStack()
-			if err != nil {
-				return err
-			}
-		}
-		return fn(ctx, cmd, args, stackName)
-	}
-}
