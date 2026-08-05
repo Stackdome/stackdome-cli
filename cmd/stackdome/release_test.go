@@ -15,10 +15,10 @@ func TestEventDataJSONStaysValid(t *testing.T) {
 }
 
 func TestRedactSecret(t *testing.T) {
-	if got := redactSecret("sdm_abcdefghijklmnop"); got != "sdm_abcd..." {
+	if got := redactSecret("sdm_abcdefghijklmnop"); got != "<redacted>" {
 		t.Errorf("long token: got %q", got)
 	}
-	if got := redactSecret("short"); got != "..." {
+	if got := redactSecret("short"); got != "<redacted>" {
 		t.Errorf("short token: got %q", got)
 	}
 	if got := redactSecret(""); got != "" {

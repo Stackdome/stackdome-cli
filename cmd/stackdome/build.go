@@ -59,11 +59,11 @@ func newBuildLogsCmd() *cobra.Command {
 			defer stream.Close()
 
 			return client.ParseSSEStream(stream, func(e client.SSEEvent) error {
-				switch e.Event {
-				case "error":
+				if e.Event == "error" {
 					fmt.Fprintf(os.Stderr, "Error: %s\n", e.Data)
 					return clierrors.New(e.Data)
-				case "end":
+				}
+				if e.IsEnd() {
 					return nil
 				}
 				fmt.Println(e.Data)

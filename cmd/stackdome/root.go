@@ -28,7 +28,8 @@ func newRootCmd() *cobra.Command {
 
 Every command runs non-interactively: pass --yes to skip confirmations,
 STACKDOME_TOKEN (and STACKDOME_URL) to authenticate without a config file, and
--o json|yaml for machine-readable output. In -o json/yaml mode stdout carries
+-o json|yaml for machine-readable output. A token scoped too narrowly to look up
+projects can name its scope directly with STACKDOME_ORG and STACKDOME_PROJECT. In -o json/yaml mode stdout carries
 only the result object; all prose, prompts, and progress go to stderr.
 
 Run ` + "`stackdome whoami`" + ` first to verify credentials.

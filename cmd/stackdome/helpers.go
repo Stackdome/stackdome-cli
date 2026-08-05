@@ -10,16 +10,28 @@ import (
 
 func resolveStackID(ctx *cmdutil.CommandContext, cmd *cobra.Command, flagStack string) (string, error) {
 	if flagStack != "" {
-		s, err := ctx.Client.FindStackByName(cmd.Context(), flagStack)
-		if err != nil {
-			return "", err
-		}
-		if s == nil {
-			return "", clierrors.NotFoundError("Stack", flagStack)
-		}
-		return *s.Id, nil
+		return resolveStackRef(ctx, cmd, flagStack)
 	}
 	return ctx.Config.RequireStack()
+}
+
+// resolveStackRef turns whatever the user typed — a stack name, a full ID, or
+// the truncated ID the list tables print — into a full stack ID. Everything
+// downstream (config current_stack included) needs the ID, so a name stored
+// verbatim would brick every later command.
+func resolveStackRef(ctx *cmdutil.CommandContext, cmd *cobra.Command, ref string) (string, error) {
+	stacks, err := ctx.Client.ListStacks(cmd.Context())
+	if err != nil {
+		return "", err
+	}
+	ids := make([]string, 0, len(stacks))
+	for i := range stacks {
+		if stacks[i].Name == ref {
+			return stacks[i].GetId(), nil
+		}
+		ids = append(ids, stacks[i].GetId())
+	}
+	return resolveIDPrefix("Stack", ref, ids)
 }
 
 // resolveIDPrefix maps a possibly-truncated ID back to a full one, docker-style:

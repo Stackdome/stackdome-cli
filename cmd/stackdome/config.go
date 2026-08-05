@@ -40,30 +40,31 @@ func newConfigViewCmd() *cobra.Command {
 	}
 }
 
-// redactSecret keeps enough of a credential to recognise which one is in play
-// without printing anything usable.
+// redactSecret replaces a credential with a fixed marker: even a prefix is a
+// credential fragment, and structured output tends to end up in logs.
 func redactSecret(s string) string {
 	if s == "" {
 		return ""
 	}
-	if len(s) > 8 {
-		return s[:8] + "..."
-	}
-	return "..."
+	return "<redacted>"
 }
 
 func newConfigSetStackCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "set-stack <stack-id>",
-		Short: "Set the current stack context",
+		Use:   "set-stack <stack>",
+		Short: "Set the current stack context (name or ID)",
 		Args:  cobra.ExactArgs(1),
-		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			if err := ctx.Config.SetCurrentStack(args[0]); err != nil {
+		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			id, err := resolveStackRef(ctx, cmd, args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Current stack set to %s\n", args[0])
+			if err := ctx.Config.SetCurrentStack(id); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Current stack set to %s (%s)\n", args[0], id)
 			return nil
-		}),
+		})),
 	}
 }
 

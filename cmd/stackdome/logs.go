@@ -50,6 +50,9 @@ func newLogsCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "Error: %s\n", e.Data)
 					return clierrors.New(e.Data)
 				}
+				if e.IsEnd() {
+					return nil
+				}
 				fmt.Println(e.Data)
 				return nil
 			})
@@ -63,4 +66,3 @@ func newLogsCmd() *cobra.Command {
 
 	return cmd
 }
-

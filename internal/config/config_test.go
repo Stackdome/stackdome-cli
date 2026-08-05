@@ -170,3 +170,51 @@ func TestLoadFrom_PrefersProjectName(t *testing.T) {
 		t.Errorf("expected project_name to win, got %q", cfg.ProjectName)
 	}
 }
+
+// STACKDOME_ORG / STACKDOME_PROJECT let a scoped API token supply the scope the
+// CLI would otherwise have to discover through the API.
+func TestOrgAndProjectFromEnv(t *testing.T) {
+	t.Setenv("STACKDOME_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("STACKDOME_TOKEN", "sdm_abc")
+	t.Setenv("STACKDOME_URL", "https://hub.example")
+	t.Setenv("STACKDOME_ORG", "org-123")
+	t.Setenv("STACKDOME_PROJECT", "default")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OrganizationID != "org-123" {
+		t.Errorf("OrganizationID = %q, want org-123", cfg.OrganizationID)
+	}
+	if cfg.ProjectName != "default" {
+		t.Errorf("ProjectName = %q, want default", cfg.ProjectName)
+	}
+}
+
+func TestOrgAndProjectFromEnvNotPersisted(t *testing.T) {
+	path := writeConfig(t, `{"server_url":"https://file","access_token":"file_tok","organization_id":"file-org","project_name":"file-proj"}`)
+	t.Setenv("STACKDOME_CONFIG", path)
+	t.Setenv("STACKDOME_ORG", "env-org")
+	t.Setenv("STACKDOME_PROJECT", "env-proj")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.CurrentStack = "web"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "env-org") || strings.Contains(string(data), "env-proj") {
+		t.Errorf("env scope persisted to disk: %s", data)
+	}
+	if !strings.Contains(string(data), "file-org") || !strings.Contains(string(data), "file-proj") {
+		t.Errorf("file scope was clobbered: %s", data)
+	}
+}

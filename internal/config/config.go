@@ -34,8 +34,12 @@ type Config struct {
 	fileServerURL    string `json:"-"`
 	fileAccessToken  string `json:"-"`
 	fileRefreshToken string `json:"-"`
+	fileOrgID        string `json:"-"`
+	fileProjectName  string `json:"-"`
 	envServerURL     string `json:"-"`
 	envAccessToken   string `json:"-"`
+	envOrgID         string `json:"-"`
+	envProjectName   string `json:"-"`
 }
 
 // TokenFromEnv reports whether the access token in play is STACKDOME_TOKEN.
@@ -51,6 +55,7 @@ func (c *Config) TokenFromEnv() bool {
 // config even when the values happen to equal STACKDOME_URL / STACKDOME_TOKEN.
 func (c *Config) AdoptEnvValues() {
 	c.envServerURL, c.envAccessToken = "", ""
+	c.envOrgID, c.envProjectName = "", ""
 }
 
 func (c *Config) urlFromEnv() bool {
@@ -81,10 +86,13 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// applyEnv overlays STACKDOME_URL / STACKDOME_TOKEN on top of the file config.
-// A token from the environment stands alone: no refresh token comes with it.
+// applyEnv overlays STACKDOME_URL / STACKDOME_TOKEN / STACKDOME_ORG /
+// STACKDOME_PROJECT on top of the file config. A token from the environment
+// stands alone: no refresh token comes with it. Org/project from the
+// environment let a scoped API token skip project discovery entirely.
 func (c *Config) applyEnv() {
 	c.fileServerURL, c.fileAccessToken, c.fileRefreshToken = c.ServerURL, c.AccessToken, c.RefreshToken
+	c.fileOrgID, c.fileProjectName = c.OrganizationID, c.ProjectName
 
 	if v := os.Getenv("STACKDOME_URL"); v != "" {
 		c.ServerURL = v
@@ -94,6 +102,14 @@ func (c *Config) applyEnv() {
 		c.AccessToken = v
 		c.RefreshToken = ""
 		c.envAccessToken = v
+	}
+	if v := os.Getenv("STACKDOME_ORG"); v != "" {
+		c.OrganizationID = v
+		c.envOrgID = v
+	}
+	if v := os.Getenv("STACKDOME_PROJECT"); v != "" {
+		c.ProjectName = v
+		c.envProjectName = v
 	}
 }
 
@@ -148,6 +164,12 @@ func (c *Config) Save() error {
 	}
 	if c.TokenFromEnv() {
 		out.AccessToken, out.RefreshToken = c.fileAccessToken, c.fileRefreshToken
+	}
+	if c.envOrgID != "" && c.OrganizationID == c.envOrgID {
+		out.OrganizationID = c.fileOrgID
+	}
+	if c.envProjectName != "" && c.ProjectName == c.envProjectName {
+		out.ProjectName = c.fileProjectName
 	}
 
 	data, err := json.MarshalIndent(&out, "", "  ")

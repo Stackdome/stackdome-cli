@@ -213,7 +213,7 @@ func renderReleaseInfo(r *openapi.StackReleaseDetail) {
 		fmt.Printf("Message:   %s\n", *r.Message)
 	}
 	if r.CreatedAt != nil {
-		fmt.Printf("Created:   %s\n", r.CreatedAt.Format(time.DateTime))
+		fmt.Printf("Created:   %s\n", r.CreatedAt.Local().Format(time.RFC3339))
 	}
 	fmt.Printf("Duration:  %s\n", releaseDuration(r.CreatedAt, r.CompletedAt))
 

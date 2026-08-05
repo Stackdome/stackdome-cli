@@ -249,7 +249,7 @@ func formatPorts(ports []openapi.Port) string {
 	parts := make([]string, 0, len(ports))
 	for _, p := range ports {
 		proto := "HTTP"
-		if p.Protocol != nil {
+		if p.Protocol != nil && *p.Protocol != "" {
 			proto = *p.Protocol
 		}
 		s := fmt.Sprintf("%d/%s", p.Number, proto)
