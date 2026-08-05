@@ -23,6 +23,10 @@ func (c *Client) StreamLogs(ctx context.Context, stackID, resourceName string, o
 	}
 	path += "/logs"
 
+	return c.openLogStream(ctx, path, opts)
+}
+
+func (c *Client) openLogStream(ctx context.Context, path string, opts LogOptions) (io.ReadCloser, error) {
 	query := "?tail=" + strconv.Itoa(int(opts.Tail))
 	if opts.Follow {
 		query += "&follow=true"

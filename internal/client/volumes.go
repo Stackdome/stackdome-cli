@@ -49,6 +49,23 @@ func (c *Client) ListVolumes(ctx context.Context, stackID string) ([]openapi.Vol
 	return list.GetItems(), nil
 }
 
+func (c *Client) CreateVolume(ctx context.Context, name, size, accessMode string) (*openapi.Volume, error) {
+	volume := openapi.Volume{
+		Name: name,
+		Spec: openapi.VolumeSpec{
+			Size:       size,
+			AccessMode: openapi.VolumeAccessMode(accessMode),
+		},
+	}
+	resp, httpResp, err := c.apiClient.DefaultApi.
+		ApiV1OrganizationsOrgIdProjectsProjectNameVolumesPost(ctx, c.orgID, c.projectName).
+		Volume(volume).Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to create volume")
+	}
+	return resp, nil
+}
+
 func (c *Client) DeleteVolume(ctx context.Context, volumeID string) error {
 	httpResp, err := c.apiClient.DefaultApi.
 		ApiV1OrganizationsOrgIdProjectsProjectNameVolumesIdDelete(ctx, c.orgID, c.projectName, volumeID).

@@ -2,9 +2,18 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"io"
 
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 )
+
+// StreamBuildLogs opens the build's SSE log stream. Same frame shape as
+// StreamLogs — feed the reader to ParseSSEStream.
+func (c *Client) StreamBuildLogs(ctx context.Context, stackID, buildID string, opts LogOptions) (io.ReadCloser, error) {
+	path := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/stacks/%s/builds/%s/logs", c.orgID, c.projectName, stackID, buildID)
+	return c.openLogStream(ctx, path, opts)
+}
 
 func (c *Client) ListBuilds(ctx context.Context, stackID string) ([]openapi.ImageBuild, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.

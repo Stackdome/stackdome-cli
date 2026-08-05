@@ -17,6 +17,7 @@ func newVolumeCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newVolumeListCmd())
+	cmd.AddCommand(newVolumeCreateCmd())
 	cmd.AddCommand(newVolumeDeleteCmd())
 	return cmd
 }
@@ -62,6 +63,40 @@ func newVolumeListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
+	return cmd
+}
+
+func newVolumeCreateCmd() *cobra.Command {
+	var (
+		flagSize       string
+		flagAccessMode string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a volume",
+		Args:  cobra.ExactArgs(1),
+		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			if flagSize == "" {
+				return clierrors.ValidationError("--size is required (e.g. 5Gi)")
+			}
+
+			volume, err := ctx.Client.CreateVolume(cmd.Context(), args[0], flagSize, flagAccessMode)
+			if err != nil {
+				return err
+			}
+
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(volume)
+			}
+
+			fmt.Fprintf(os.Stderr, "Volume %q created.\n", volume.Name)
+			return nil
+		})),
+	}
+
+	cmd.Flags().StringVar(&flagSize, "size", "", "Volume size (e.g. 5Gi)")
+	cmd.Flags().StringVar(&flagAccessMode, "access-mode", "ReadWriteOnce", "Access mode (ReadWriteOnce, ReadWriteMany, ReadOnlyMany)")
 	return cmd
 }
 

@@ -7,7 +7,9 @@ import (
 
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
+	"github.com/stackdome/cli/internal/client"
 	"github.com/stackdome/cli/internal/cmdutil"
+	clierrors "github.com/stackdome/cli/internal/errors"
 	"github.com/stackdome/cli/internal/output"
 )
 
@@ -19,6 +21,56 @@ func newBuildCmd() *cobra.Command {
 
 	cmd.AddCommand(newBuildListCmd())
 	cmd.AddCommand(newBuildInfoCmd())
+	cmd.AddCommand(newBuildLogsCmd())
+	return cmd
+}
+
+func newBuildLogsCmd() *cobra.Command {
+	var (
+		flagFollow bool
+		flagTail   int32
+		flagSince  string
+		flagStack  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "logs <build-id>",
+		Short: "Stream logs for a build",
+		Args:  cobra.ExactArgs(1),
+		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			stackID, err := resolveStackID(ctx, cmd, flagStack)
+			if err != nil {
+				return err
+			}
+
+			stream, err := ctx.Client.StreamBuildLogs(cmd.Context(), stackID, args[0], client.LogOptions{
+				Follow: flagFollow,
+				Tail:   flagTail,
+				Since:  flagSince,
+			})
+			if err != nil {
+				return err
+			}
+			defer stream.Close()
+
+			return client.ParseSSEStream(stream, func(e client.SSEEvent) error {
+				switch e.Event {
+				case "error":
+					fmt.Fprintf(os.Stderr, "Error: %s\n", e.Data)
+					return clierrors.New(e.Data)
+				case "end":
+					return nil
+				}
+				fmt.Println(e.Data)
+				return nil
+			})
+		})),
+	}
+
+	cmd.Flags().BoolVarP(&flagFollow, "follow", "f", false, "Follow log output")
+	cmd.Flags().Int32Var(&flagTail, "tail", 200, "Number of lines to show")
+	cmd.Flags().StringVar(&flagSince, "since", "", "Show logs since duration (e.g. 5m, 1h)")
+	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 	return cmd
 }
 
