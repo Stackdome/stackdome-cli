@@ -43,7 +43,12 @@ func newBuildLogsCmd() *cobra.Command {
 				return err
 			}
 
-			stream, err := ctx.Client.StreamBuildLogs(cmd.Context(), stackID, args[0], client.LogOptions{
+			buildID, err := resolveBuildID(ctx, cmd, stackID, args[0])
+			if err != nil {
+				return err
+			}
+
+			stream, err := ctx.Client.StreamBuildLogs(cmd.Context(), stackID, buildID, client.LogOptions{
 				Follow: flagFollow,
 				Tail:   flagTail,
 				Since:  flagSince,
@@ -143,7 +148,12 @@ func newBuildInfoCmd() *cobra.Command {
 				return err
 			}
 
-			build, err := ctx.Client.GetBuild(cmd.Context(), stackID, args[0])
+			buildID, err := resolveBuildID(ctx, cmd, stackID, args[0])
+			if err != nil {
+				return err
+			}
+
+			build, err := ctx.Client.GetBuild(cmd.Context(), stackID, buildID)
 			if err != nil {
 				return err
 			}

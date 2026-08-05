@@ -87,7 +87,12 @@ func newReleaseInfoCmd() *cobra.Command {
 				return err
 			}
 
-			release, err := ctx.Client.GetRelease(cmd.Context(), stackID, args[0])
+			releaseID, err := resolveReleaseID(ctx, cmd, stackID, args[0])
+			if err != nil {
+				return err
+			}
+
+			release, err := ctx.Client.GetRelease(cmd.Context(), stackID, releaseID)
 			if err != nil {
 				return err
 			}
@@ -117,10 +122,15 @@ func newReleaseCancelCmd() *cobra.Command {
 				return err
 			}
 
-			if err := ctx.Client.CancelRelease(cmd.Context(), stackID, args[0]); err != nil {
+			releaseID, err := resolveReleaseID(ctx, cmd, stackID, args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Release %s cancelled.\n", args[0])
+
+			if err := ctx.Client.CancelRelease(cmd.Context(), stackID, releaseID); err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Release %s cancelled.\n", releaseID)
 			return nil
 		})),
 	}
@@ -145,8 +155,13 @@ func newReleaseEventsCmd() *cobra.Command {
 				return err
 			}
 
+			releaseID, err := resolveReleaseID(ctx, cmd, stackID, args[0])
+			if err != nil {
+				return err
+			}
+
 			if flagFollow {
-				events, err := ctx.Client.StreamReleaseEvents(cmd.Context(), stackID, args[0], 0)
+				events, err := ctx.Client.StreamReleaseEvents(cmd.Context(), stackID, releaseID, 0)
 				if err != nil {
 					return err
 				}
@@ -170,7 +185,7 @@ func newReleaseEventsCmd() *cobra.Command {
 				return streamErr
 			}
 
-			events, err := ctx.Client.ListReleaseEvents(cmd.Context(), stackID, args[0], 0)
+			events, err := ctx.Client.ListReleaseEvents(cmd.Context(), stackID, releaseID, 0)
 			if err != nil {
 				return err
 			}
