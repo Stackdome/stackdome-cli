@@ -181,8 +181,8 @@ func renderBuildInfo(b *openapi.ImageBuild) {
 		fmt.Printf("Image:     %s\n", *b.Status.ImageUrl)
 	}
 
-	if b.CreatedAt != nil {
-		fmt.Printf("Started:   %s\n", b.CreatedAt.Format(time.DateTime))
+	if start := buildStartTime(*b); start != nil {
+		fmt.Printf("Started:   %s\n", start.Format(time.DateTime))
 	}
 
 	fmt.Printf("Duration:  %s\n", buildDuration(*b))
@@ -255,19 +255,81 @@ func buildSource(b openapi.ImageBuild) string {
 }
 
 func buildStarted(b openapi.ImageBuild) string {
-	if b.CreatedAt == nil {
+	start := buildStartTime(b)
+	if start == nil {
 		return "-"
 	}
-	return output.TimeAgo(*b.CreatedAt)
+	return output.TimeAgo(*start)
 }
 
 func buildDuration(b openapi.ImageBuild) string {
-	if b.CreatedAt == nil || b.UpdatedAt == nil {
+	if b.CreatedAt != nil && b.UpdatedAt != nil {
+		return fmtDuration(b.UpdatedAt.Sub(*b.CreatedAt))
+	}
+	start, end := buildStartTime(b), buildEndTime(b)
+	if start == nil {
 		return "-"
 	}
-	d := b.UpdatedAt.Sub(*b.CreatedAt)
+	// end.After(start) guards the single-condition case, where the start and
+	// end fallbacks resolve to the same condition.
+	if end != nil && end.After(*start) && buildIsTerminal(b) {
+		return fmtDuration(end.Sub(*start))
+	}
+	if !buildIsTerminal(b) {
+		return fmtDuration(time.Since(*start))
+	}
+	return "-"
+}
+
+func fmtDuration(d time.Duration) string {
 	if d < time.Second {
 		return "<1s"
 	}
 	return d.Round(time.Second).String()
+}
+
+func buildIsTerminal(b openapi.ImageBuild) bool {
+	if b.Status == nil || b.Status.State == nil {
+		return false
+	}
+	return *b.Status.State == "Success" || *b.Status.State == "Failed"
+}
+
+// buildStartTime prefers the model timestamp; the API omits it today
+// (hub #10), so fall back to the BuildJobCreated condition or the earliest one.
+func buildStartTime(b openapi.ImageBuild) *time.Time {
+	if b.CreatedAt != nil {
+		return b.CreatedAt
+	}
+	return conditionTime(b, "BuildJobCreated", false)
+}
+
+// buildEndTime mirrors buildStartTime: model timestamp, else the Available
+// condition (build completion) or the latest condition.
+func buildEndTime(b openapi.ImageBuild) *time.Time {
+	if b.UpdatedAt != nil {
+		return b.UpdatedAt
+	}
+	return conditionTime(b, "Available", true)
+}
+
+// conditionTime returns the transition time of the named condition, else the
+// latest (or earliest) transition time across all conditions.
+func conditionTime(b openapi.ImageBuild, want string, latest bool) *time.Time {
+	if b.Status == nil {
+		return nil
+	}
+	var fallback *time.Time
+	for _, c := range b.Status.Conditions {
+		if c.LastTransitionTime == nil {
+			continue
+		}
+		if c.Type != nil && *c.Type == want {
+			return c.LastTransitionTime
+		}
+		if fallback == nil || (latest && c.LastTransitionTime.After(*fallback)) || (!latest && c.LastTransitionTime.Before(*fallback)) {
+			fallback = c.LastTransitionTime
+		}
+	}
+	return fallback
 }
