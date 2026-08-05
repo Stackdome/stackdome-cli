@@ -3,9 +3,12 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -122,8 +125,42 @@ func TestNoRefreshTokenSurfaces401(t *testing.T) {
 
 	var cliErr *clierrors.CLIError
 	wrapped := WrapError(httpResp, err, "get config")
-	if !asCLIError(wrapped, &cliErr) || cliErr.ExitCode != clierrors.ExitAuth {
+	if !errors.As(wrapped, &cliErr) || cliErr.ExitCode != clierrors.ExitAuth {
 		t.Fatalf("WrapError = %#v, want CLIError with exit code %d", wrapped, clierrors.ExitAuth)
+	}
+}
+
+// A failure to write the rotated pair to disk must not fail the command: the
+// refresh succeeded, so retry with the live token and warn on stderr.
+func TestPersistFailureStillRetries(t *testing.T) {
+	srv := &refreshServer{t: t, wantToken: "access-new"}
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	stderr, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	c := New(ts.URL,
+		WithTokens("access-old", "refresh-old"),
+		WithTokenRefreshCallback(func(string, string) error {
+			return fmt.Errorf("config is read-only")
+		}),
+	)
+
+	_, httpResp, err := c.API().ApiV1ConfigGet(context.Background()).Execute()
+	w.Close()
+	warning, _ := io.ReadAll(stderr)
+
+	if err != nil || httpResp.StatusCode != http.StatusOK {
+		t.Fatalf("want retry to succeed, got status=%v err=%v", httpResp.StatusCode, err)
+	}
+	if !strings.Contains(string(warning), "could not save refreshed credentials: config is read-only") {
+		t.Errorf("stderr = %q, want a persist warning naming the cause", warning)
 	}
 }
 
@@ -186,12 +223,4 @@ func TestFailedRefreshDoesNotRecurse(t *testing.T) {
 	if srv.authHits != 1 {
 		t.Errorf("refresh hit %d times, want exactly 1", srv.authHits)
 	}
-}
-
-func asCLIError(err error, target **clierrors.CLIError) bool {
-	e, ok := err.(*clierrors.CLIError)
-	if ok {
-		*target = e
-	}
-	return ok
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -135,7 +137,13 @@ func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	}
 	token := t.client.accessToken
 	t.mu.Unlock()
-	if err != nil {
+
+	// A persist failure is not a refresh failure: the pair already rotated and
+	// the old refresh token is revoked server-side, so retrying with the live
+	// token is strictly better than failing a command with valid credentials.
+	if errors.Is(err, errPersistTokens) {
+		fmt.Fprintf(os.Stderr, "warning: %v; you may need to log in again\n", err)
+	} else if err != nil || token == stale {
 		if body != nil {
 			body.Close()
 		}
@@ -199,10 +207,16 @@ func (c *Client) TryRefreshToken(ctx context.Context) error {
 	c.applyAuth()
 
 	if c.onTokenRefresh != nil {
-		return c.onTokenRefresh(c.accessToken, c.refreshToken)
+		if err := c.onTokenRefresh(c.accessToken, c.refreshToken); err != nil {
+			return fmt.Errorf("%w: %w", errPersistTokens, err)
+		}
 	}
 	return nil
 }
+
+// errPersistTokens marks the case where the refresh itself succeeded but saving
+// the rotated pair did not — the credentials in memory are still good.
+var errPersistTokens = errors.New("could not save refreshed credentials")
 
 func WrapError(httpResp *http.Response, err error, message string) error {
 	if httpResp != nil {
