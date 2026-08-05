@@ -24,6 +24,10 @@ type refreshServer struct {
 	configHits int
 	seenAuth   []string
 	bodies     []string
+	// rejectStatus/rejectBody override the rejection shape (default 401 +
+	// "token expired") so tests can exercise the 403-with-token-reason contract.
+	rejectStatus int
+	rejectBody   string
 }
 
 func (s *refreshServer) handler() http.Handler {
@@ -55,8 +59,12 @@ func (s *refreshServer) handler() http.Handler {
 				s.bodies = append(s.bodies, string(b))
 			}
 			if r.Header.Get("Authorization") != "Bearer "+s.wantToken {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"reason":"token expired"}`))
+				status, body := s.rejectStatus, s.rejectBody
+				if status == 0 {
+					status, body = http.StatusUnauthorized, `{"reason":"token expired"}`
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(body))
 				return
 			}
 			_, _ = w.Write([]byte(`{}`))
@@ -222,5 +230,81 @@ func TestFailedRefreshDoesNotRecurse(t *testing.T) {
 	}
 	if srv.authHits != 1 {
 		t.Errorf("refresh hit %d times, want exactly 1", srv.authHits)
+	}
+}
+
+// Server contract: an expired or unparseable access token comes back as a 403
+// carrying a token reason, so those must still refresh and retry — same set the
+// web UI refreshes on (frontend/src/api/client.ts).
+func TestRefreshOn403TokenReason(t *testing.T) {
+	for name, body := range map[string]string{
+		"lowercase":   `{"code":403,"id":"forbidden","kind":"auth","reason":"token expired"}`,
+		"capitalized": `{"code":403,"id":"forbidden","kind":"auth","reason":"Token is expired"}`,
+		"expired by":  `{"code":403,"id":"forbidden","kind":"auth","reason":"token is expired by 3m0s"}`,
+		"parse error": `{"code":403,"id":"forbidden","kind":"auth","reason":"token parse error"}`,
+		"items":       `{"code":403,"id":"forbidden","kind":"auth","items":[{"reason":"Token is expired"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := &refreshServer{
+				t:            t,
+				wantToken:    "access-new",
+				rejectStatus: http.StatusForbidden,
+				rejectBody:   body,
+			}
+			ts := httptest.NewServer(srv.handler())
+			defer ts.Close()
+
+			c := New(ts.URL, WithTokens("access-old", "refresh-old"))
+
+			_, httpResp, err := c.API().ApiV1ConfigGet(context.Background()).Execute()
+			if err != nil {
+				t.Fatalf("request failed after refresh: %v", err)
+			}
+			if httpResp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", httpResp.StatusCode)
+			}
+			if srv.authHits != 1 {
+				t.Errorf("refresh endpoint hit %d times, want 1", srv.authHits)
+			}
+			if len(srv.seenAuth) != 2 || srv.seenAuth[1] != "Bearer access-new" {
+				t.Errorf("request auth headers = %v, want retry to carry access-new", srv.seenAuth)
+			}
+		})
+	}
+}
+
+// A real permission denial is not an expired token: no refresh, and the body
+// must reach the caller verbatim so the reason still renders.
+func TestPlain403DoesNotRefresh(t *testing.T) {
+	const denied = `{"code":403,"id":"forbidden","kind":"auth","reason":"insufficient permissions"}`
+	srv := &refreshServer{
+		t:            t,
+		wantToken:    "nobody",
+		rejectStatus: http.StatusForbidden,
+		rejectBody:   denied,
+	}
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	c := New(ts.URL, WithTokens("access-old", "refresh-old"))
+
+	_, httpResp, err := c.API().ApiV1ConfigGet(context.Background()).Execute()
+	if err == nil {
+		t.Fatal("expected 403 error")
+	}
+	if httpResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", httpResp.StatusCode)
+	}
+	if srv.authHits != 0 {
+		t.Errorf("refresh attempted for a plain 403 (%d hits)", srv.authHits)
+	}
+	if srv.configHits != 1 {
+		t.Errorf("request sent %d times, want 1 (no retry)", srv.configHits)
+	}
+	if got := extractAPIReason(err); got != "insufficient permissions" {
+		t.Errorf("reason = %q, want %q — body was not preserved", got, "insufficient permissions")
+	}
+	if b, ok := err.(bodyer); !ok || string(b.Body()) != denied {
+		t.Errorf("error body = %q, want verbatim %q", b.Body(), denied)
 	}
 }

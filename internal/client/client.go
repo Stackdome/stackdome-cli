@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +112,7 @@ type refreshTransport struct {
 
 func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.base.RoundTrip(req)
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+	if err != nil || !shouldRefresh(resp) {
 		return resp, err
 	}
 	if req.Context().Value(noRetryKey{}) != nil || !t.client.canRefresh() {
@@ -155,6 +157,43 @@ func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	retry.Body = body
 	retry.Header.Set("Authorization", "Bearer "+token)
 	return t.base.RoundTrip(retry)
+}
+
+// tokenReason matches the server's wording for an expired or unparseable access
+// token — same patterns the web UI refreshes on.
+var tokenReason = regexp.MustCompile(`(?i)token parse error|token (is )?expired|expired by`)
+
+// shouldRefresh reports whether resp is an access-token rejection worth one
+// refresh + retry.
+//
+// Server contract: expired/invalid access tokens return 403 with a token reason
+// (matches web UI's shouldRefresh — frontend/src/api/client.ts). A 403 therefore
+// only counts when the body says so; genuine permission denials fall through
+// with their body buffered and restored, byte-identical for error rendering.
+func shouldRefresh(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	if resp.StatusCode != http.StatusForbidden || resp.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	var apiErr struct {
+		Reason string `json:"reason"`
+		Items  []struct {
+			Reason string `json:"reason"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(body, &apiErr)
+	if len(apiErr.Items) > 0 && tokenReason.MatchString(apiErr.Items[0].Reason) {
+		return true
+	}
+	return tokenReason.MatchString(apiErr.Reason)
 }
 
 // canRefresh reports whether a refresh is even meaningful: env tokens and
