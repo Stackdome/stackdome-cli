@@ -1,14 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
+	"github.com/stackdome/cli/internal/client"
 	"github.com/stackdome/cli/internal/cmdutil"
 	clierrors "github.com/stackdome/cli/internal/errors"
 	"github.com/stackdome/cli/internal/output"
@@ -31,19 +32,14 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 
-			existing, err := ctx.Client.FindStackByName(cmd.Context(), stack.Name)
-			if err != nil {
+			// Names in `secrets:`/`addons:` become IDs before the document is
+			// sent — the server only speaks IDs.
+			if err := stackfile.ResolveStack(cmd.Context(), stack, &apiResolver{c: ctx.Client}); err != nil {
 				return err
 			}
 
-			var result *openapi.Stack
-			if existing != nil {
-				fmt.Fprintf(os.Stderr, "Updating stack %q...\n", stack.Name)
-				result, err = ctx.Client.UpdateStack(cmd.Context(), *existing.Id, *stack)
-			} else {
-				fmt.Fprintf(os.Stderr, "Creating stack %q...\n", stack.Name)
-				result, err = ctx.Client.CreateStack(cmd.Context(), *stack)
-			}
+			fmt.Fprintf(os.Stderr, "Applying stack %q...\n", stack.Name)
+			result, err := ctx.Client.ApplyStack(cmd.Context(), *stack)
 			if err != nil {
 				return err
 			}
@@ -52,40 +48,63 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 
-			if flagWait {
-				spin := output.NewSpinner("Waiting for stack to be ready...")
-				spin.Start()
-				final, err := waitForStack(ctx, cmd, *result.Id)
-				spin.Stop()
-				if err != nil {
-					return err
-				}
-
-				if !ctx.Formatter.IsTable() {
-					return ctx.Formatter.PrintStructured(final)
-				}
-
-				live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), final)
-				if err != nil {
-					return err
-				}
-				output.RenderStackStatus(os.Stdout, final, live, false)
+			if !flagWait {
+				fmt.Fprintf(os.Stderr, "\nStack %q submitted. Track progress with:\n", result.Name)
+				fmt.Fprintf(os.Stderr, "  stackdome status          # current state\n")
+				fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")
+				fmt.Fprintf(os.Stderr, "  stackdome logs            # stream logs\n")
 				return nil
 			}
 
-			fmt.Fprintf(os.Stderr, "\nStack %q submitted. Track progress with:\n", result.Name)
-			fmt.Fprintf(os.Stderr, "  stackdome status          # current state\n")
-			fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")
-			fmt.Fprintf(os.Stderr, "  stackdome logs            # stream logs\n")
-			return nil
+			// Follow the release this apply produced — never whatever release
+			// happened to be newest before it.
+			releaseID, err := appliedReleaseID(ctx, cmd, result)
+			if err != nil {
+				return err
+			}
+
+			waitErr := followRelease(ctx, cmd, *result.Id, releaseID)
+
+			if err := printFinalStack(ctx, cmd, *result.Id); err != nil && waitErr == nil {
+				return err
+			}
+			return waitErr
 		})),
 	}
 
 	cmd.Flags().StringVarP(&flagFile, "file", "f", "stackfile.yaml", "Path to stackfile or stack JSON")
 	cmd.Flags().StringVar(&flagName, "name", "", "Override stack name")
-	cmd.Flags().BoolVarP(&flagWait, "wait", "w", false, "Wait for stack to be ready")
+	cmd.Flags().BoolVarP(&flagWait, "wait", "w", false, "Wait for the release to finish")
 
 	return cmd
+}
+
+// apiResolver turns stackfile names into API IDs.
+type apiResolver struct{ c *client.Client }
+
+func (r *apiResolver) ResolveSecretByName(ctx context.Context, name string) (string, error) {
+	secret, err := r.c.FindSecretByName(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if secret == nil || secret.Id == nil {
+		return "", clierrors.Newf("Secret %q not found. Run `stackdome secret list` to see available secrets.", name)
+	}
+	return *secret.Id, nil
+}
+
+func (r *apiResolver) ResolveAddonByName(ctx context.Context, addonType, name string) (string, error) {
+	if addonType != "postgres" {
+		return "", clierrors.Newf("Unsupported addon type %q", addonType)
+	}
+	addon, err := r.c.FindPostgresAddonByName(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if addon == nil || addon.Id == nil {
+		return "", clierrors.Newf("Postgres addon %q not found. Check available addons in the dashboard.", name)
+	}
+	return *addon.Id, nil
 }
 
 func loadStack(path, nameOverride string) (*openapi.Stack, error) {
@@ -121,39 +140,107 @@ func loadStack(path, nameOverride string) (*openapi.Stack, error) {
 	}
 }
 
-func waitForStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string) (*openapi.Stack, error) {
-	timeout := time.After(5 * time.Minute)
-	tick := time.NewTicker(3 * time.Second)
-	defer tick.Stop()
-
-	for {
-		select {
-		case <-cmd.Context().Done():
-			return nil, clierrors.New("Interrupted")
-		case <-timeout:
-			stack, _ := ctx.Client.GetStack(cmd.Context(), stackID)
-			if stack != nil {
-				return stack, nil
-			}
-			return nil, clierrors.New("Timed out waiting for stack to be ready")
-		case <-tick.C:
-			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
-			if err != nil {
-				continue
-			}
-			rel := output.StackRelease(stack)
-			if rel == nil || rel.State == nil {
-				continue
-			}
-			state := string(*rel.State)
-			switch state {
-			case "Released":
-				fmt.Fprintf(os.Stderr, "Stack is ready.\n")
-				return stack, nil
-			case "Failed", "Cancelled", "Superseded":
-				fmt.Fprintf(os.Stderr, "Release %s.\n", strings.ToLower(state))
-				return stack, nil
-			}
-		}
+// appliedReleaseID identifies the release the apply just created. The apply
+// response carries it when the server populates latest_release; otherwise we
+// read the newest release for the stack.
+func appliedReleaseID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stack *openapi.Stack) (string, error) {
+	if rel := stack.LatestRelease; rel != nil && rel.Id != nil {
+		return *rel.Id, nil
 	}
+	rel, err := ctx.Client.LatestRelease(cmd.Context(), *stack.Id)
+	if err != nil {
+		return "", err
+	}
+	if rel == nil || rel.Id == nil {
+		return "", clierrors.New("Stack applied but no release was created.")
+	}
+	return *rel.Id, nil
+}
+
+// followRelease streams a release's events to stderr and resolves its outcome.
+// A release that did not reach Released is an error, so `deploy --wait` exits
+// non-zero on a failed deploy.
+func followRelease(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, releaseID string) error {
+	events, err := ctx.Client.StreamReleaseEvents(cmd.Context(), stackID, releaseID, 0)
+	if err != nil {
+		return err
+	}
+	for e := range events {
+		printReleaseEventLine(os.Stderr, e)
+	}
+	if cmd.Context().Err() != nil {
+		return clierrors.New("Interrupted")
+	}
+
+	release, err := ctx.Client.GetRelease(cmd.Context(), stackID, releaseID)
+	if err != nil {
+		return err
+	}
+	return releaseOutcomeError(release)
+}
+
+func releaseOutcomeError(release *openapi.StackReleaseDetail) error {
+	state := ""
+	if release.State != nil {
+		state = string(*release.State)
+	}
+
+	switch openapi.StackReleaseState(state) {
+	case openapi.RELEASE_STATE_RELEASED:
+		fmt.Fprintln(os.Stderr, output.Green("Release succeeded."))
+		return nil
+	case openapi.RELEASE_STATE_FAILED,
+		openapi.RELEASE_STATE_CANCELLED,
+		openapi.RELEASE_STATE_SUPERSEDED:
+		return clierrors.Newf("Release %s: %s", strings.ToLower(state), releaseFailureDetail(release))
+	default:
+		return clierrors.Newf("Release did not finish (state: %s)", state)
+	}
+}
+
+func releaseFailureDetail(release *openapi.StackReleaseDetail) string {
+	if release.Message != nil && *release.Message != "" {
+		return *release.Message
+	}
+	if len(release.ValidationErrors) > 0 {
+		parts := make([]string, 0, len(release.ValidationErrors))
+		for _, ve := range release.ValidationErrors {
+			parts = append(parts, validationErrorLine(ve))
+		}
+		return strings.Join(parts, "; ")
+	}
+	if release.Cause != nil && release.Cause.Detail != nil && *release.Cause.Detail != "" {
+		return *release.Cause.Detail
+	}
+	return "no detail reported"
+}
+
+func validationErrorLine(ve openapi.ReleaseValidationError) string {
+	var b strings.Builder
+	if ve.ResourceName != nil {
+		b.WriteString(*ve.ResourceName + ": ")
+	}
+	if ve.Field != nil {
+		b.WriteString(*ve.Field + " ")
+	}
+	if ve.Message != nil {
+		b.WriteString(*ve.Message)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func printFinalStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string) error {
+	final, err := ctx.Client.GetStack(cmd.Context(), stackID)
+	if err != nil {
+		return err
+	}
+	if !ctx.Formatter.IsTable() {
+		return ctx.Formatter.PrintStructured(final)
+	}
+	live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), final)
+	if err != nil {
+		return err
+	}
+	output.RenderStackStatus(os.Stdout, final, live, false)
+	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 type Resolver interface {
@@ -24,7 +23,7 @@ func ResolveStack(ctx context.Context, stack *openapi.Stack, resolver Resolver) 
 			}
 			id, err := resolver.ResolveSecretByName(ctx, *conn.From.Name)
 			if err != nil {
-				return clierrors.Newf("Secret %q not found. Run `stackdome secret list` to see available secrets.", *conn.From.Name)
+				return err
 			}
 			conn.From.Id = &id
 			conn.From.Name = nil
@@ -35,7 +34,7 @@ func ResolveStack(ctx context.Context, stack *openapi.Stack, resolver Resolver) 
 			}
 			id, err := resolver.ResolveAddonByName(ctx, "postgres", *conn.From.Name)
 			if err != nil {
-				return clierrors.Newf("Postgres addon %q not found. Check available addons in the dashboard.", *conn.From.Name)
+				return err
 			}
 			conn.From.Id = &id
 			conn.From.Name = nil

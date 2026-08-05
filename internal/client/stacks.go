@@ -16,6 +16,20 @@ func (c *Client) CreateStack(ctx context.Context, stack openapi.Stack) (*openapi
 	return resp, nil
 }
 
+// ApplyStack upserts a stack by name from a whole stack document. It replaces
+// the read-modify-write of FindStackByName + POST/PUT: the server reconciles
+// against the document (create if absent), so there is no race and no readOnly
+// field to strip.
+func (c *Client) ApplyStack(ctx context.Context, stack openapi.Stack) (*openapi.Stack, error) {
+	resp, httpResp, err := c.apiClient.DefaultApi.
+		ApplyStackByName(ctx, c.orgID, c.projectName).
+		Stack(stack).Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to apply stack")
+	}
+	return resp, nil
+}
+
 func (c *Client) GetStack(ctx context.Context, stackID string) (*openapi.Stack, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.
 		ApiV1OrganizationsOrgIdProjectsProjectNameStacksIdGet(ctx, c.orgID, c.projectName, stackID).Execute()
