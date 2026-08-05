@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
 	clierrors "github.com/stackdome/cli/internal/errors"
+	"github.com/stackdome/cli/internal/output"
 )
 
 func newOpenCmd() *cobra.Command {
@@ -25,10 +26,18 @@ func newOpenCmd() *cobra.Command {
 				return err
 			}
 
-			resources, err := ctx.Client.GetStackResources(cmd.Context(), stackID)
+			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+
+			// Public URLs live on the release status, not on the stack resources.
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			resources := stack.Spec.StackResources
 
 			resourceFilter := ""
 			if len(args) > 0 {
@@ -45,10 +54,11 @@ func newOpenCmd() *cobra.Command {
 				if resourceFilter != "" && res.Name != resourceFilter {
 					continue
 				}
-				if res.Status == nil {
+				status := output.ResourceStatus(live, res.Name)
+				if status == nil {
 					continue
 				}
-				for _, ing := range res.Status.PublicIngress {
+				for _, ing := range status.PublicIngress {
 					if ing.Url != nil && *ing.Url != "" {
 						urls = append(urls, publicURL{Resource: res.Name, URL: *ing.Url})
 					}

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/samber/lo"
 	"k8s.io/utils/ptr"
 )
@@ -40,15 +40,15 @@ func (sf *Stackfile) buildResources() []openapi.StackResource {
 		}
 
 		if res.Image != "" {
-			sr.ImageSpec = &openapi.ImageSpec{Image: res.Image}
+			sr.Source = &openapi.SourceSpec{Image: &openapi.ImageSource{Ref: res.Image}}
 		}
 
 		if res.Build != nil {
-			sr.BuildSpec = buildSpec(res.Build)
+			sr.Source = &openapi.SourceSpec{Git: gitSource(res.Build)}
 		}
 
 		if res.Stateful {
-			sr.Stateful = ptr.To(true)
+			sr.WorkloadType = ptr.To("StatefulService")
 		}
 
 		sr.Ports = buildPorts(res.Ports)
@@ -60,53 +60,33 @@ func (sf *Stackfile) buildResources() []openapi.StackResource {
 	return resources
 }
 
-func buildSpec(b *BuildConfig) *openapi.StackResourceBuildSpec {
-	spec := &openapi.StackResourceBuildSpec{
-		ContextPathWithinSource: ".",
-		DockerfilePath:          "Dockerfile",
-		ImageRepository: openapi.ImageRepository{
-			UseInternalRegistry: ptr.To(true),
-		},
+func gitSource(b *BuildConfig) *openapi.GitSource {
+	src := &openapi.GitSource{
+		RepoUrl:        b.Repo,
+		BuildContext:   ptr.To("."),
+		DockerfilePath: ptr.To("Dockerfile"),
 	}
 
 	if b.Context != "" {
-		spec.ContextPathWithinSource = b.Context
+		src.BuildContext = ptr.To(b.Context)
 	}
 	if b.Dockerfile != "" {
-		spec.DockerfilePath = b.Dockerfile
+		src.DockerfilePath = ptr.To(b.Dockerfile)
 	}
 
-	spec.SourceContext = openapi.BuildSourceContext{
-		GitRepo: &openapi.BuildSourceContextGitRepo{
-			RepoUrl: b.Repo,
-		},
+	switch {
+	case b.Branch != "":
+		src.Branch = ptr.To(b.Branch)
+	case b.Tag != "":
+		src.Tag = ptr.To(b.Tag)
+	default:
+		src.Branch = ptr.To("main")
+	}
+	if b.Commit != "" {
+		src.Commit = ptr.To(b.Commit)
 	}
 
-	revision := openapi.BuildSourceRevision{}
-	if b.Branch != "" {
-		revision.GitRepoRevision = &openapi.GitRepoRevision{
-			Branch: &openapi.GitRepoRevisionBranch{
-				Name: ptr.To(b.Branch),
-			},
-		}
-	} else if b.Tag != "" {
-		revision.GitRepoRevision = &openapi.GitRepoRevision{
-			Tag: ptr.To(b.Tag),
-		}
-	} else if b.Commit != "" {
-		revision.GitRepoRevision = &openapi.GitRepoRevision{
-			Commit: ptr.To(b.Commit),
-		}
-	} else {
-		revision.GitRepoRevision = &openapi.GitRepoRevision{
-			Branch: &openapi.GitRepoRevisionBranch{
-				Name: ptr.To("main"),
-			},
-		}
-	}
-	spec.SourceRevision = revision
-
-	return spec
+	return src
 }
 
 func buildPorts(ports []PortDef) []openapi.Port {

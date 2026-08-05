@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
 	"github.com/stackdome/cli/internal/output"
@@ -172,10 +172,10 @@ func buildSource(b openapi.ImageBuild) string {
 	rev := b.SourceRevision
 	if rev.GitRepoRevision != nil {
 		git := rev.GitRepoRevision
-		if git.Branch != nil && git.Branch.Name != nil {
-			name := *git.Branch.Name
-			if git.Branch.HeadSha != nil && len(*git.Branch.HeadSha) >= 7 {
-				return name + "@" + (*git.Branch.HeadSha)[:7]
+		if git.Branch != nil {
+			name := *git.Branch
+			if git.Commit != nil && len(*git.Commit) >= 7 {
+				return name + "@" + (*git.Commit)[:7]
 			}
 			return name
 		}

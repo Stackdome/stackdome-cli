@@ -3,7 +3,7 @@ package client
 import (
 	"context"
 
-	serverapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
@@ -69,26 +69,29 @@ func (c *Client) GetCurrentUser(ctx context.Context) (*serverapi.User, error) {
 	return resp, nil
 }
 
-func (c *Client) GetOrgTeams(ctx context.Context, orgID string) ([]serverapi.Team, error) {
-	resp, httpResp, err := c.apiClient.DefaultApi.ApiV1OrganizationsOrgIdTeamsGet(ctx, orgID).Execute()
+func (c *Client) ListCurrentUserProjects(ctx context.Context) ([]serverapi.Project, error) {
+	resp, httpResp, err := c.apiClient.DefaultApi.ApiV1UsersCurrentProjectsGet(ctx).Execute()
 	if err != nil {
-		return nil, WrapError(httpResp, err, "Failed to get teams")
+		return nil, WrapError(httpResp, err, "Failed to get projects")
 	}
 	return resp.Items, nil
 }
 
-func (c *Client) ResolveDefaultTeam(ctx context.Context, orgID string) (string, error) {
-	teams, err := c.GetOrgTeams(ctx, orgID)
+// ResolveDefaultProject picks the project the CLI operates in. Projects are not
+// exposed in the CLI UX, so we resolve one silently: the default project if the
+// API marks one, otherwise the first.
+func (c *Client) ResolveDefaultProject(ctx context.Context) (string, error) {
+	projects, err := c.ListCurrentUserProjects(ctx)
 	if err != nil {
 		return "", err
 	}
-	for _, t := range teams {
-		if t.DefaultTeam != nil && *t.DefaultTeam {
-			return t.Name, nil
+	for _, p := range projects {
+		if p.DefaultProject != nil && *p.DefaultProject {
+			return p.Name, nil
 		}
 	}
-	if len(teams) > 0 {
-		return teams[0].Name, nil
+	if len(projects) > 0 {
+		return projects[0].Name, nil
 	}
-	return "", clierrors.New("No teams found for your account.")
+	return "", clierrors.New("No projects found for your account.")
 }

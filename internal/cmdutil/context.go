@@ -25,7 +25,7 @@ func NewCommandContext(cfg *config.Config, format output.Format, logLevel slog.L
 	if cfg.IsLoggedIn() {
 		c = client.New(cfg.ServerURL,
 			client.WithTokens(cfg.AccessToken, cfg.RefreshToken),
-			client.WithOrgAndTeam(cfg.OrganizationID, cfg.TeamName),
+			client.WithOrgAndProject(cfg.OrganizationID, cfg.ProjectName),
 			client.WithInsecure(cfg.Insecure),
 			client.WithTokenRefreshCallback(func(accessToken, refreshToken string) error {
 				cfg.AccessToken = accessToken

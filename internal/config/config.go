@@ -21,7 +21,7 @@ type Config struct {
 	AccessToken    string `json:"access_token,omitempty"`
 	RefreshToken   string `json:"refresh_token,omitempty"`
 	OrganizationID string `json:"organization_id,omitempty"`
-	TeamName       string `json:"team_name,omitempty"`
+	ProjectName    string `json:"project_name,omitempty"`
 	Username       string `json:"username,omitempty"`
 	CurrentStack   string `json:"current_stack,omitempty"`
 	Insecure       bool   `json:"insecure,omitempty"`
@@ -62,6 +62,17 @@ func LoadFrom(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, clierrors.Wrapf(err, "Failed to parse config from %s", path)
 	}
+
+	// Teams were renamed to projects; adopt the legacy key from older configs.
+	if cfg.ProjectName == "" {
+		var legacy struct {
+			TeamName string `json:"team_name"`
+		}
+		if json.Unmarshal(data, &legacy) == nil {
+			cfg.ProjectName = legacy.TeamName
+		}
+	}
+
 	cfg.path = path
 	return cfg, nil
 }

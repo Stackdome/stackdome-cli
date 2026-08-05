@@ -48,7 +48,7 @@ func newSignupCmd() *cobra.Command {
 				return err
 			}
 
-			teamName, err := c.ResolveDefaultTeam(cmd.Context(), result.User.GetOrganisationId())
+			projectName, err := c.ResolveDefaultProject(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -62,7 +62,7 @@ func newSignupCmd() *cobra.Command {
 			cfg.AccessToken = result.AccessToken
 			cfg.RefreshToken = result.RefreshToken
 			cfg.OrganizationID = result.User.GetOrganisationId()
-			cfg.TeamName = teamName
+			cfg.ProjectName = projectName
 			cfg.Username = userDisplayName(result.User)
 			cfg.Insecure = flagInsecure
 

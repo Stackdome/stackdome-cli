@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"time"
 
-	serverapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
@@ -22,7 +22,7 @@ type Client struct {
 	accessToken    string
 	refreshToken   string
 	orgID          string
-	teamName       string
+	projectName    string
 	baseURL        string
 	onTokenRefresh func(accessToken, refreshToken string) error
 }
@@ -49,10 +49,10 @@ func WithTokens(accessToken, refreshToken string) Option {
 	}
 }
 
-func WithOrgAndTeam(orgID, teamName string) Option {
+func WithOrgAndProject(orgID, projectName string) Option {
 	return func(c *Client) {
 		c.orgID = orgID
-		c.teamName = teamName
+		c.projectName = projectName
 	}
 }
 
@@ -102,16 +102,16 @@ func (c *Client) SetTokens(accessToken, refreshToken string) {
 	c.applyAuth()
 }
 
-func (c *Client) SetOrgAndTeam(orgID, teamName string) {
+func (c *Client) SetOrgAndProject(orgID, projectName string) {
 	c.orgID = orgID
-	c.teamName = teamName
+	c.projectName = projectName
 }
 
-func (c *Client) OrgID() string    { return c.orgID }
-func (c *Client) TeamName() string { return c.teamName }
+func (c *Client) OrgID() string       { return c.orgID }
+func (c *Client) ProjectName() string { return c.projectName }
 
-func (c *Client) TeamPath() string {
-	return fmt.Sprintf("/organizations/%s/teams/%s", c.orgID, c.teamName)
+func (c *Client) ProjectPath() string {
+	return fmt.Sprintf("/organizations/%s/projects/%s", c.orgID, c.projectName)
 }
 
 func (c *Client) TryRefreshToken(ctx context.Context) error {

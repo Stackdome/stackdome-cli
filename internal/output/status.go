@@ -6,26 +6,52 @@ import (
 	"strings"
 	"time"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
 )
 
-func RenderStackStatus(w io.Writer, stack *openapi.Stack, showConditions bool) {
+// RenderStackStatus prints a stack and its resources. Runtime status now lives on
+// the stack's release (live), not on the Stack/StackResource entities, so live may
+// be nil when the stack has never been released.
+func RenderStackStatus(w io.Writer, stack *openapi.Stack, live *openapi.ReleaseLiveStatus, showConditions bool) {
+	rel := StackRelease(stack)
+
 	state := "Unknown"
-	if stack.Status != nil && stack.Status.State != nil {
-		state = *stack.Status.State
+	if rel != nil && rel.State != nil {
+		state = string(*rel.State)
 	}
 
 	fmt.Fprintf(w, "Stack: %-20s State: %s\n\n", Bold(stack.Name), StateColor(state))
 
-	if stack.Status != nil && stack.Status.Message != nil && *stack.Status.Message != "" {
-		fmt.Fprintf(w, "  %s\n\n", *stack.Status.Message)
+	if rel != nil && rel.Message != nil && *rel.Message != "" {
+		fmt.Fprintf(w, "  %s\n\n", *rel.Message)
 	}
 
-	renderResourceTable(w, stack.Spec.StackResources)
+	renderResourceTable(w, stack.Spec.StackResources, live)
 
-	renderFailures(w, stack.Spec.StackResources, showConditions)
+	renderFailures(w, stack.Spec.StackResources, live, showConditions)
+}
+
+// StackRelease returns the release that describes the stack's current runtime
+// state: the latest one if there is one, otherwise the converged one.
+func StackRelease(stack *openapi.Stack) *openapi.ReleaseSummary {
+	if stack.LatestRelease != nil {
+		return stack.LatestRelease
+	}
+	return stack.ConvergedRelease
+}
+
+// ResourceStatus returns the live status of a named stack resource, if any.
+// ResourceStatus returns the live status of a named stack resource, if any.
+func ResourceStatus(live *openapi.ReleaseLiveStatus, name string) *openapi.StackResourceStatus {
+	if live == nil || live.Resources == nil {
+		return nil
+	}
+	if st, ok := (*live.Resources)[name]; ok {
+		return &st
+	}
+	return nil
 }
 
 var (
@@ -33,14 +59,15 @@ var (
 	cellStyle   = lipgloss.NewStyle().PaddingRight(2)
 )
 
-func renderResourceTable(w io.Writer, resources []openapi.StackResource) {
+func renderResourceTable(w io.Writer, resources []openapi.StackResource, live *openapi.ReleaseLiveStatus) {
 	var rows [][]string
 	for _, res := range resources {
+		st := ResourceStatus(live, res.Name)
 		rows = append(rows, []string{
 			res.Name,
-			StateColor(resourceState(&res)),
+			StateColor(resourceState(st)),
 			formatPorts(res.Ports),
-			formatURL(&res),
+			formatURL(st),
 		})
 	}
 
@@ -59,41 +86,37 @@ func renderResourceTable(w io.Writer, resources []openapi.StackResource) {
 	fmt.Fprintln(w, t)
 }
 
-func renderFailures(w io.Writer, resources []openapi.StackResource, showConditions bool) {
+func renderFailures(w io.Writer, resources []openapi.StackResource, live *openapi.ReleaseLiveStatus, showConditions bool) {
 	hasFailures := false
 	for _, res := range resources {
-		if res.Status == nil || res.Status.LastFailure == nil {
-			if showConditions && res.Status != nil && len(res.Status.Conditions) > 0 {
-				if !hasFailures {
-					hasFailures = true
-				}
-			}
+		st := ResourceStatus(live, res.Name)
+		if st == nil || st.LastFailure == nil {
 			continue
 		}
 		if !hasFailures {
 			fmt.Fprintf(w, "%s\n\n", Bold("FAILURES:"))
 			hasFailures = true
 		}
-		renderResourceFailure(w, &res)
+		renderResourceFailure(w, res.Name, st)
 	}
 
 	if showConditions {
 		for _, res := range resources {
-			if res.Status != nil && len(res.Status.Conditions) > 0 {
-				renderConditions(w, &res)
+			if st := ResourceStatus(live, res.Name); st != nil && len(st.Conditions) > 0 {
+				renderConditions(w, res.Name, st)
 			}
 		}
 	}
 }
 
-func renderResourceFailure(w io.Writer, res *openapi.StackResource) {
-	failure := res.Status.LastFailure
+func renderResourceFailure(w io.Writer, name string, status *openapi.StackResourceStatus) {
+	failure := status.LastFailure
 	failureType := ""
 	if failure.Type != nil {
 		failureType = *failure.Type
 	}
 
-	fmt.Fprintf(w, "  %s — %s\n", Bold(res.Name), Red(failureType))
+	fmt.Fprintf(w, "  %s — %s\n", Bold(name), Red(failureType))
 
 	if failure.Container != nil {
 		renderContainerFailure(w, "Container", failure.Container)
@@ -105,8 +128,8 @@ func renderResourceFailure(w io.Writer, res *openapi.StackResource) {
 		renderBuildFailure(w, failure.Build)
 	}
 
-	if len(res.Status.Conditions) > 0 {
-		renderLastConditions(w, res.Status.Conditions, 3)
+	if len(status.Conditions) > 0 {
+		renderLastConditions(w, status.Conditions, 3)
 	}
 
 	fmt.Fprintln(w)
@@ -191,11 +214,11 @@ func conditionRow(c openapi.Condition) []string {
 	return []string{status, condType, reason, message, age}
 }
 
-func renderConditions(w io.Writer, res *openapi.StackResource) {
-	fmt.Fprintf(w, "\n%s conditions:\n", Bold(res.Name))
+func renderConditions(w io.Writer, name string, status *openapi.StackResourceStatus) {
+	fmt.Fprintf(w, "\n%s conditions:\n", Bold(name))
 
 	var rows [][]string
-	for _, c := range res.Status.Conditions {
+	for _, c := range status.Conditions {
 		rows = append(rows, conditionRow(c))
 	}
 
@@ -210,11 +233,11 @@ func renderConditions(w io.Writer, res *openapi.StackResource) {
 	fmt.Fprintln(w, t)
 }
 
-func resourceState(res *openapi.StackResource) string {
-	if res.Status == nil || res.Status.State == nil {
+func resourceState(status *openapi.StackResourceStatus) string {
+	if status == nil || status.State == nil {
 		return "Unknown"
 	}
-	return *res.Status.State
+	return *status.State
 }
 
 func formatPorts(ports []openapi.Port) string {
@@ -236,12 +259,12 @@ func formatPorts(ports []openapi.Port) string {
 	return strings.Join(parts, ", ")
 }
 
-func formatURL(res *openapi.StackResource) string {
-	if res.Status == nil || len(res.Status.PublicIngress) == 0 {
+func formatURL(status *openapi.StackResourceStatus) string {
+	if status == nil || len(status.PublicIngress) == 0 {
 		return "-"
 	}
 	urls := make([]string, 0)
-	for _, ing := range res.Status.PublicIngress {
+	for _, ing := range status.PublicIngress {
 		if ing.Url != nil && *ing.Url != "" {
 			urls = append(urls, *ing.Url)
 		}

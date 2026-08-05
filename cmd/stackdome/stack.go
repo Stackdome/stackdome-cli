@@ -49,8 +49,8 @@ func newStackListCmd() *cobra.Command {
 					marker = "*"
 				}
 				state := "Unknown"
-				if s.Status != nil && s.Status.State != nil {
-					state = *s.Status.State
+				if rel := output.StackRelease(&s); rel != nil && rel.State != nil {
+					state = string(*rel.State)
 				}
 				id := ""
 				if s.Id != nil {
@@ -82,7 +82,12 @@ func newStackInfoCmd() *cobra.Command {
 				return ctx.Formatter.PrintStructured(stack)
 			}
 
-			output.RenderStackStatus(os.Stdout, stack, true)
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			output.RenderStackStatus(os.Stdout, stack, live, true)
 			return nil
 		})),
 	}

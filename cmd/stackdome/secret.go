@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"

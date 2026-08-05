@@ -52,7 +52,12 @@ func newStatusCmd() *cobra.Command {
 				return ctx.Formatter.PrintStructured(stack)
 			}
 
-			output.RenderStackStatus(os.Stdout, stack, flagConditions)
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			output.RenderStackStatus(os.Stdout, stack, live, flagConditions)
 			return nil
 		})),
 	}
@@ -74,9 +79,14 @@ func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string
 			return err
 		}
 
+		live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+		if err != nil {
+			return err
+		}
+
 		// Clear screen
 		os.Stdout.WriteString("\033[2J\033[H")
-		output.RenderStackStatus(os.Stdout, stack, showConditions)
+		output.RenderStackStatus(os.Stdout, stack, live, showConditions)
 
 		select {
 		case <-cmd.Context().Done():

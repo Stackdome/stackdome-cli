@@ -52,11 +52,11 @@ func TabEscape(s string) string {
 
 func StateColor(state string) string {
 	switch state {
-	case "Ready":
+	case "Ready", "Released", "Running":
 		return Green(state)
-	case "Pending":
+	case "Pending", "InProgress", "Progressing":
 		return Yellow(state)
-	case "Failed", "Error":
+	case "Failed", "Error", "Degraded", "Unavailable":
 		return Red(state)
 	case "Deleting":
 		return Magenta(state)

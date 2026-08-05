@@ -65,7 +65,7 @@ func newConfigSetContextCmd() *cobra.Command {
 			ctx.Config.AccessToken = ""
 			ctx.Config.RefreshToken = ""
 			ctx.Config.OrganizationID = ""
-			ctx.Config.TeamName = ""
+			ctx.Config.ProjectName = ""
 			ctx.Config.Username = ""
 			ctx.Config.CurrentStack = ""
 

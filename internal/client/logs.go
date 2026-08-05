@@ -17,7 +17,7 @@ type LogOptions struct {
 }
 
 func (c *Client) StreamLogs(ctx context.Context, stackID, resourceName string, opts LogOptions) (io.ReadCloser, error) {
-	path := fmt.Sprintf("/api/v1/organizations/%s/teams/%s/stacks/%s", c.orgID, c.teamName, stackID)
+	path := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/stacks/%s", c.orgID, c.projectName, stackID)
 	if resourceName != "" {
 		path += fmt.Sprintf("/resources/%s", resourceName)
 	}

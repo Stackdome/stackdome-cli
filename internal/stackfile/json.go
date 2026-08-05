@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	clierrors "github.com/stackdome/cli/internal/errors"
 )
 

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	serverapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/client"
 	"github.com/stackdome/cli/internal/config"
@@ -63,7 +63,7 @@ func loginWithToken(cmd *cobra.Command, cfg *config.Config, serverURL, token str
 		return err
 	}
 
-	teamName, err := c.ResolveDefaultTeam(cmd.Context(), user.GetOrganisationId())
+	projectName, err := c.ResolveDefaultProject(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func loginWithToken(cmd *cobra.Command, cfg *config.Config, serverURL, token str
 	cfg.AccessToken = token
 	cfg.RefreshToken = ""
 	cfg.OrganizationID = user.GetOrganisationId()
-	cfg.TeamName = teamName
+	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(user)
 	cfg.Insecure = insecure
 
@@ -99,7 +99,7 @@ func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, ema
 		return err
 	}
 
-	teamName, err := c.ResolveDefaultTeam(cmd.Context(), result.User.GetOrganisationId())
+	projectName, err := c.ResolveDefaultProject(cmd.Context())
 	if err != nil {
 		return err
 	}
@@ -108,7 +108,7 @@ func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, ema
 	cfg.AccessToken = result.AccessToken
 	cfg.RefreshToken = result.RefreshToken
 	cfg.OrganizationID = result.User.GetOrganisationId()
-	cfg.TeamName = teamName
+	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(result.User)
 	cfg.Insecure = insecure
 

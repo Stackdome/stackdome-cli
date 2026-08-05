@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
 	clierrors "github.com/stackdome/cli/internal/errors"
@@ -65,7 +65,11 @@ func newDeployCmd() *cobra.Command {
 					return ctx.Formatter.PrintStructured(final)
 				}
 
-				output.RenderStackStatus(os.Stdout, final, false)
+				live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), final)
+				if err != nil {
+					return err
+				}
+				output.RenderStackStatus(os.Stdout, final, live, false)
 				return nil
 			}
 
@@ -137,16 +141,17 @@ func waitForStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID strin
 			if err != nil {
 				continue
 			}
-			if stack.Status == nil || stack.Status.State == nil {
+			rel := output.StackRelease(stack)
+			if rel == nil || rel.State == nil {
 				continue
 			}
-			state := *stack.Status.State
+			state := string(*rel.State)
 			switch state {
-			case "Ready":
+			case "Released":
 				fmt.Fprintf(os.Stderr, "Stack is ready.\n")
 				return stack, nil
-			case "Failed", "Error":
-				fmt.Fprintf(os.Stderr, "Stack %s.\n", strings.ToLower(state))
+			case "Failed", "Cancelled":
+				fmt.Fprintf(os.Stderr, "Release %s.\n", strings.ToLower(state))
 				return stack, nil
 			}
 		}

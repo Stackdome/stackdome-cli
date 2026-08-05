@@ -26,7 +26,7 @@ func TestFixture_BasicImage(t *testing.T) {
 		t.Fatalf("expected 1 resource, got %d", len(stack.Spec.StackResources))
 	}
 	res := stack.Spec.StackResources[0]
-	if res.ImageSpec == nil || res.ImageSpec.Image != "nginx:latest" {
+	if res.Source == nil || res.Source.Image == nil || res.Source.Image.Ref != "nginx:latest" {
 		t.Error("expected image nginx:latest")
 	}
 	if len(res.Ports) != 1 || !res.Ports[0].ExposedToPublic {
@@ -43,16 +43,17 @@ func TestFixture_BuildFromSource(t *testing.T) {
 	stack := sf.ToStack()
 	res := stack.Spec.StackResources[0]
 
-	if res.BuildSpec == nil {
-		t.Fatal("expected build spec")
+	if res.Source == nil || res.Source.Git == nil {
+		t.Fatal("expected git source")
 	}
-	if res.BuildSpec.SourceContext.GitRepo.RepoUrl != "https://github.com/myorg/myapp.git" {
+	git := res.Source.Git
+	if git.RepoUrl != "https://github.com/myorg/myapp.git" {
 		t.Error("wrong repo url")
 	}
-	if res.BuildSpec.ContextPathWithinSource != "./backend" {
-		t.Errorf("expected context './backend', got %q", res.BuildSpec.ContextPathWithinSource)
+	if git.BuildContext == nil || *git.BuildContext != "./backend" {
+		t.Errorf("expected context './backend', got %v", git.BuildContext)
 	}
-	if *res.BuildSpec.SourceRevision.GitRepoRevision.Branch.Name != "develop" {
+	if git.Branch == nil || *git.Branch != "develop" {
 		t.Error("expected branch develop")
 	}
 }

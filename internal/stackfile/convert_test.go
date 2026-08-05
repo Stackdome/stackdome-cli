@@ -3,7 +3,7 @@ package stackfile
 import (
 	"testing"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 )
 
 func TestToStack_BasicImageResource(t *testing.T) {
@@ -32,11 +32,11 @@ func TestToStack_BasicImageResource(t *testing.T) {
 	if res.Name != "web" {
 		t.Errorf("expected resource name 'web', got %q", res.Name)
 	}
-	if res.ImageSpec == nil || res.ImageSpec.Image != "nginx:latest" {
-		t.Errorf("expected image 'nginx:latest', got %v", res.ImageSpec)
+	if res.Source == nil || res.Source.Image == nil || res.Source.Image.Ref != "nginx:latest" {
+		t.Errorf("expected image 'nginx:latest', got %v", res.Source)
 	}
-	if res.BuildSpec != nil {
-		t.Error("expected no build spec for image resource")
+	if res.Source.Git != nil {
+		t.Error("expected no git source for image resource")
 	}
 	if len(res.Ports) != 1 {
 		t.Fatalf("expected 1 port, got %d", len(res.Ports))
@@ -67,29 +67,24 @@ func TestToStack_BuildFromSource(t *testing.T) {
 	stack := sf.ToStack()
 	res := stack.Spec.StackResources[0]
 
-	if res.ImageSpec != nil {
-		t.Error("expected no image spec for build resource")
+	if res.Source == nil || res.Source.Image != nil {
+		t.Error("expected no image source for build resource")
 	}
-	if res.BuildSpec == nil {
-		t.Fatal("expected build spec")
+	git := res.Source.Git
+	if git == nil {
+		t.Fatal("expected git source")
 	}
-	if res.BuildSpec.SourceContext.GitRepo == nil {
-		t.Fatal("expected git repo source context")
+	if git.RepoUrl != "https://github.com/myorg/myapp.git" {
+		t.Errorf("unexpected repo url: %s", git.RepoUrl)
 	}
-	if res.BuildSpec.SourceContext.GitRepo.RepoUrl != "https://github.com/myorg/myapp.git" {
-		t.Errorf("unexpected repo url: %s", res.BuildSpec.SourceContext.GitRepo.RepoUrl)
+	if git.BuildContext == nil || *git.BuildContext != "./backend" {
+		t.Errorf("expected context './backend', got %v", git.BuildContext)
 	}
-	if res.BuildSpec.ContextPathWithinSource != "./backend" {
-		t.Errorf("expected context './backend', got %q", res.BuildSpec.ContextPathWithinSource)
+	if git.DockerfilePath == nil || *git.DockerfilePath != "docker/Dockerfile.prod" {
+		t.Errorf("expected dockerfile 'docker/Dockerfile.prod', got %v", git.DockerfilePath)
 	}
-	if res.BuildSpec.DockerfilePath != "docker/Dockerfile.prod" {
-		t.Errorf("expected dockerfile 'docker/Dockerfile.prod', got %q", res.BuildSpec.DockerfilePath)
-	}
-	if res.BuildSpec.SourceRevision.GitRepoRevision == nil {
-		t.Fatal("expected git repo revision")
-	}
-	if res.BuildSpec.SourceRevision.GitRepoRevision.Branch == nil || *res.BuildSpec.SourceRevision.GitRepoRevision.Branch.Name != "develop" {
-		t.Errorf("expected branch 'develop', got %v", res.BuildSpec.SourceRevision.GitRepoRevision.Branch)
+	if git.Branch == nil || *git.Branch != "develop" {
+		t.Errorf("expected branch 'develop', got %v", git.Branch)
 	}
 }
 
@@ -108,17 +103,15 @@ func TestToStack_BuildDefaults(t *testing.T) {
 	stack := sf.ToStack()
 	res := stack.Spec.StackResources[0]
 
-	if res.BuildSpec.ContextPathWithinSource != "." {
-		t.Errorf("expected default context '.', got %q", res.BuildSpec.ContextPathWithinSource)
+	git := res.Source.Git
+	if git.BuildContext == nil || *git.BuildContext != "." {
+		t.Errorf("expected default context '.', got %v", git.BuildContext)
 	}
-	if res.BuildSpec.DockerfilePath != "Dockerfile" {
-		t.Errorf("expected default dockerfile 'Dockerfile', got %q", res.BuildSpec.DockerfilePath)
+	if git.DockerfilePath == nil || *git.DockerfilePath != "Dockerfile" {
+		t.Errorf("expected default dockerfile 'Dockerfile', got %v", git.DockerfilePath)
 	}
-	if res.BuildSpec.SourceRevision.GitRepoRevision.Branch == nil || *res.BuildSpec.SourceRevision.GitRepoRevision.Branch.Name != "main" {
+	if git.Branch == nil || *git.Branch != "main" {
 		t.Error("expected default branch 'main'")
-	}
-	if res.BuildSpec.ImageRepository.UseInternalRegistry == nil || !*res.BuildSpec.ImageRepository.UseInternalRegistry {
-		t.Error("expected internal registry to be true by default")
 	}
 }
 
@@ -131,11 +124,11 @@ func TestToStack_BuildWithTag(t *testing.T) {
 	}
 
 	stack := sf.ToStack()
-	rev := stack.Spec.StackResources[0].BuildSpec.SourceRevision.GitRepoRevision
-	if rev.Tag == nil || *rev.Tag != "v1.0.0" {
-		t.Errorf("expected tag 'v1.0.0', got %v", rev.Tag)
+	git := stack.Spec.StackResources[0].Source.Git
+	if git.Tag == nil || *git.Tag != "v1.0.0" {
+		t.Errorf("expected tag 'v1.0.0', got %v", git.Tag)
 	}
-	if rev.Branch != nil {
+	if git.Branch != nil {
 		t.Error("expected no branch when tag is set")
 	}
 }
@@ -149,9 +142,13 @@ func TestToStack_BuildWithCommit(t *testing.T) {
 	}
 
 	stack := sf.ToStack()
-	rev := stack.Spec.StackResources[0].BuildSpec.SourceRevision.GitRepoRevision
-	if rev.Commit == nil || *rev.Commit != "abc123" {
-		t.Errorf("expected commit 'abc123', got %v", rev.Commit)
+	git := stack.Spec.StackResources[0].Source.Git
+	if git.Commit == nil || *git.Commit != "abc123" {
+		t.Errorf("expected commit 'abc123', got %v", git.Commit)
+	}
+	// The API requires a commit pin to be accompanied by a branch or tag.
+	if git.Branch == nil || *git.Branch != "main" {
+		t.Errorf("expected commit to be pinned on default branch, got %v", git.Branch)
 	}
 }
 
@@ -453,8 +450,8 @@ func TestToStack_Volumes(t *testing.T) {
 	}
 
 	// Check stateful flag
-	if res.Stateful == nil || !*res.Stateful {
-		t.Error("expected stateful=true")
+	if res.WorkloadType == nil || *res.WorkloadType != "StatefulService" {
+		t.Errorf("expected workload type StatefulService, got %v", res.WorkloadType)
 	}
 }
 
