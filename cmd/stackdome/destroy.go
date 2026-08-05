@@ -42,8 +42,7 @@ func newDestroyCmd() *cobra.Command {
 			}
 
 			if ctx.Config.CurrentStack == stackID {
-				ctx.Config.CurrentStack = ""
-				_ = ctx.Config.Save()
+				_ = ctx.Config.SetCurrentStack("")
 			}
 
 			fmt.Fprintf(os.Stderr, "Stack %q deletion initiated.\n", stack.Name)

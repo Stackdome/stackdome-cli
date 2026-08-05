@@ -48,7 +48,8 @@ func TestEnvVarsNotPersisted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.SetCurrentStack("web"); err != nil {
+	cfg.CurrentStack = "web"
+	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,6 +62,61 @@ func TestEnvVarsNotPersisted(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "file_tok") {
 		t.Errorf("file token was clobbered: %s", data)
+	}
+}
+
+// A login performed while STACKDOME_TOKEN is set must persist the credential
+// it just obtained, not the stale one the file already held.
+func TestLoginWhileEnvTokenSetPersistsNewToken(t *testing.T) {
+	path := writeConfig(t, `{"server_url":"https://file","access_token":"old_tok"}`)
+	t.Setenv("STACKDOME_CONFIG", path)
+	t.Setenv("STACKDOME_TOKEN", "sdm_abc")
+	t.Setenv("STACKDOME_URL", "https://hub.example")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ServerURL = "https://new"
+	cfg.AccessToken = "new_tok"
+	cfg.RefreshToken = "new_refresh"
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"new_tok", "new_refresh", "https://new"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("expected %q in saved config: %s", want, data)
+		}
+	}
+	if strings.Contains(string(data), "old_tok") {
+		t.Errorf("stale token persisted over the new one: %s", data)
+	}
+}
+
+// An env-token session must not create or depend on a config file.
+func TestSetCurrentStackWithEnvTokenDoesNotWriteFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.json")
+	t.Setenv("STACKDOME_CONFIG", path)
+	t.Setenv("STACKDOME_TOKEN", "sdm_abc")
+	t.Setenv("STACKDOME_URL", "https://hub.example")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetCurrentStack("web"); err != nil {
+		t.Fatalf("SetCurrentStack: %v", err)
+	}
+	if cfg.CurrentStack != "web" {
+		t.Errorf("CurrentStack = %q, want web (in memory)", cfg.CurrentStack)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("config file was created at %s", path)
 	}
 }
 

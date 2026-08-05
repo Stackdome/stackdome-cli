@@ -28,18 +28,27 @@ type Config struct {
 
 	path string `json:"-"`
 
-	// Values read from the config file, kept so Save never persists the
-	// ephemeral STACKDOME_URL / STACKDOME_TOKEN overrides.
+	// What the file held and what the environment overrode it with, so Save
+	// can drop the ephemeral STACKDOME_URL / STACKDOME_TOKEN values — but only
+	// while they are still the values in play.
 	fileServerURL    string `json:"-"`
 	fileAccessToken  string `json:"-"`
 	fileRefreshToken string `json:"-"`
-	urlFromEnv       bool   `json:"-"`
-	tokenFromEnv     bool   `json:"-"`
+	envServerURL     string `json:"-"`
+	envAccessToken   string `json:"-"`
 }
 
-// TokenFromEnv reports whether the access token came from STACKDOME_TOKEN.
-// Env tokens are not refreshable — there is no refresh token to pair them with.
-func (c *Config) TokenFromEnv() bool { return c.tokenFromEnv }
+// TokenFromEnv reports whether the access token in play is STACKDOME_TOKEN.
+// False once login/signup replaces it — that token is a real credential and
+// belongs on disk. Env tokens are not refreshable: no refresh token comes
+// with them, and they must never be written out.
+func (c *Config) TokenFromEnv() bool {
+	return c.envAccessToken != "" && c.AccessToken == c.envAccessToken
+}
+
+func (c *Config) urlFromEnv() bool {
+	return c.envServerURL != "" && c.ServerURL == c.envServerURL
+}
 
 func DefaultPath() (string, error) {
 	if p := os.Getenv("STACKDOME_CONFIG"); p != "" {
@@ -72,12 +81,12 @@ func (c *Config) applyEnv() {
 
 	if v := os.Getenv("STACKDOME_URL"); v != "" {
 		c.ServerURL = v
-		c.urlFromEnv = true
+		c.envServerURL = v
 	}
 	if v := os.Getenv("STACKDOME_TOKEN"); v != "" {
 		c.AccessToken = v
 		c.RefreshToken = ""
-		c.tokenFromEnv = true
+		c.envAccessToken = v
 	}
 }
 
@@ -124,12 +133,13 @@ func (c *Config) Save() error {
 		return clierrors.Wrapf(err, "Failed to create config directory %s", dir)
 	}
 
-	// Env overrides are ephemeral — write back what the file had.
+	// Env overrides are ephemeral — write back what the file had, unless
+	// login/signup has since replaced the value with a real credential.
 	out := *c
-	if c.urlFromEnv {
+	if c.urlFromEnv() {
 		out.ServerURL = c.fileServerURL
 	}
-	if c.tokenFromEnv {
+	if c.TokenFromEnv() {
 		out.AccessToken, out.RefreshToken = c.fileAccessToken, c.fileRefreshToken
 	}
 
@@ -177,6 +187,11 @@ func (c *Config) RequireStack() (string, error) {
 
 func (c *Config) SetCurrentStack(name string) error {
 	c.CurrentStack = name
+	// An env-token session is stateless by design: don't create (or fail on)
+	// a config file just to remember the stack for a process that's exiting.
+	if c.TokenFromEnv() {
+		return nil
+	}
 	return c.Save()
 }
 
