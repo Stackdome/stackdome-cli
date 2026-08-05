@@ -150,7 +150,7 @@ func waitForStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID strin
 			case "Released":
 				fmt.Fprintf(os.Stderr, "Stack is ready.\n")
 				return stack, nil
-			case "Failed", "Cancelled":
+			case "Failed", "Cancelled", "Superseded":
 				fmt.Fprintf(os.Stderr, "Release %s.\n", strings.ToLower(state))
 				return stack, nil
 			}

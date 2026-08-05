@@ -75,10 +75,13 @@ func (c *Client) RestartResource(ctx context.Context, stackID, resourceName stri
 // GetStackLiveStatus returns the runtime status of a stack's resources, which
 // now lives on the stack's release rather than on the stack itself. Returns nil
 // when the stack has no release yet.
+//
+// It reports on the converged release — what is actually serving — falling back
+// to the latest release only when nothing has converged yet.
 func (c *Client) GetStackLiveStatus(ctx context.Context, stack *openapi.Stack) (*openapi.ReleaseLiveStatus, error) {
-	rel := stack.LatestRelease
+	rel := stack.ConvergedRelease
 	if rel == nil {
-		rel = stack.ConvergedRelease
+		rel = stack.LatestRelease
 	}
 	if rel == nil || rel.Id == nil || stack.Id == nil {
 		return nil, nil

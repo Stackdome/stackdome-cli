@@ -43,7 +43,6 @@ func StackRelease(stack *openapi.Stack) *openapi.ReleaseSummary {
 }
 
 // ResourceStatus returns the live status of a named stack resource, if any.
-// ResourceStatus returns the live status of a named stack resource, if any.
 func ResourceStatus(live *openapi.ReleaseLiveStatus, name string) *openapi.StackResourceStatus {
 	if live == nil || live.Resources == nil {
 		return nil
