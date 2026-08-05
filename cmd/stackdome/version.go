@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"runtime"
 
 	"github.com/spf13/cobra"
+	"github.com/stackdome/cli/internal/cmdutil"
 )
 
 var (
@@ -17,13 +17,26 @@ func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the CLI version",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Printf("stackdome %s\n", Version)
-			fmt.Printf("  commit:  %s\n", GitCommit)
-			fmt.Printf("  built:   %s\n", BuildDate)
-			fmt.Printf("  go:      %s\n", runtime.Version())
-			fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			info := struct {
+				Version string `json:"version"`
+				Commit  string `json:"commit"`
+				Built   string `json:"built"`
+				Go      string `json:"go"`
+				OSArch  string `json:"os_arch"`
+			}{Version, GitCommit, BuildDate, runtime.Version(), runtime.GOOS + "/" + runtime.GOARCH}
+
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(info)
+			}
+
+			f := ctx.Formatter
+			f.Printf("stackdome %s\n", info.Version)
+			f.Printf("  commit:  %s\n", info.Commit)
+			f.Printf("  built:   %s\n", info.Built)
+			f.Printf("  go:      %s\n", info.Go)
+			f.Printf("  os/arch: %s\n", info.OSArch)
 			return nil
-		},
+		}),
 	}
 }

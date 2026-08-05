@@ -56,6 +56,9 @@ func newDeployCmd() *cobra.Command {
 			}
 
 			if !flagWait {
+				if !ctx.Formatter.IsTable() {
+					return ctx.Formatter.PrintStructured(result)
+				}
 				fmt.Fprintf(os.Stderr, "\nRelease #%d for stack %q submitted. Track progress with:\n", release.GetSequence(), result.Name)
 				fmt.Fprintf(os.Stderr, "  stackdome release events %s -f\n", release.GetId())
 				fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")

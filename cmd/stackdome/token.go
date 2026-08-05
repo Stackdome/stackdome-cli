@@ -61,7 +61,7 @@ func newTokenCreateCmd() *cobra.Command {
 			fmt.Fprintf(os.Stderr, "Token %q created. Save it now — it will not be shown again.\n\n", token.GetName())
 			fmt.Println(token.GetToken())
 			if t := token.GetExpiresAt(); !t.IsZero() {
-				fmt.Fprintf(os.Stderr, "\nExpires: %s\n", t.Format(time.DateTime))
+				fmt.Fprintf(os.Stderr, "\nExpires: %s\n", t.Local().Format(time.RFC3339))
 			}
 			return nil
 		})),
@@ -185,7 +185,7 @@ func tokenExpiry(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return "never"
 	}
-	return t.Format(time.DateTime)
+	return t.Local().Format(time.RFC3339)
 }
 
 func tokenLastUsed(t *time.Time) string {

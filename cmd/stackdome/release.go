@@ -152,9 +152,19 @@ func newReleaseEventsCmd() *cobra.Command {
 				}
 				var streamErr error
 				for e := range events {
-					printReleaseEventLine(os.Stdout, e)
 					if e.Event == "error" {
+						// Surfaced as the command error; printing it here too
+						// would duplicate it (and pollute -o json stdout).
 						streamErr = clierrors.New(e.Data)
+						continue
+					}
+					// Structured mode streams the raw event payloads as
+					// newline-delimited JSON; the human formatter would put
+					// prose and ANSI colour on stdout.
+					if ctx.Formatter.IsTable() {
+						printReleaseEventLine(os.Stdout, e)
+					} else {
+						fmt.Fprintln(os.Stdout, e.Data)
 					}
 				}
 				return streamErr

@@ -139,6 +139,10 @@ func newSecretCreateCmd() *cobra.Command {
 				return err
 			}
 
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(result)
+			}
+
 			fmt.Fprintf(os.Stderr, "Secret %q created.\n", result.Name)
 			return nil
 		})),
@@ -188,9 +192,13 @@ func newSecretSetCmd() *cobra.Command {
 				updated.Description = existing.Description
 			}
 
-			_, err = ctx.Client.UpdateSecret(cmd.Context(), *existing.Id, updated)
+			result, err := ctx.Client.UpdateSecret(cmd.Context(), *existing.Id, updated)
 			if err != nil {
 				return err
+			}
+
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(result)
 			}
 
 			fmt.Fprintf(os.Stderr, "Secret %q updated.\n", args[0])

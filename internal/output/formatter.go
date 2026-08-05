@@ -50,11 +50,22 @@ func (f *Formatter) PrintJSON(v any) error {
 	return enc.Encode(v)
 }
 
+// PrintYAML routes through JSON first so the API types' `json:` tags decide the
+// key names — yaml.Marshal alone would emit lowercased Go field names.
 func (f *Formatter) PrintYAML(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	var generic any
+	if err := json.Unmarshal(b, &generic); err != nil {
+		return err
+	}
+
 	enc := yaml.NewEncoder(f.Writer)
 	enc.SetIndent(2)
 	defer enc.Close()
-	return enc.Encode(v)
+	return enc.Encode(generic)
 }
 
 func (f *Formatter) PrintStructured(v any) error {

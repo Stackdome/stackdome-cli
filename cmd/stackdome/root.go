@@ -24,7 +24,23 @@ func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "stackdome",
 		Short:         "CLI for the Stackdome platform",
-		Long:          "Deploy, manage, and monitor your applications on Stackdome.",
+		Long: `Deploy, manage, and monitor your applications on Stackdome.
+
+Every command runs non-interactively: pass --yes to skip confirmations,
+STACKDOME_TOKEN (and STACKDOME_URL) to authenticate without a config file, and
+-o json|yaml for machine-readable output. In -o json/yaml mode stdout carries
+only the result object; all prose, prompts, and progress go to stderr.
+
+Run ` + "`stackdome whoami`" + ` first to verify credentials.
+
+Exit codes:
+  0    success
+  1    general error
+  2    authentication / authorization failure
+  3    not found
+  4    invalid input or usage
+  5    conflict (already exists, or state does not allow the operation)
+  130  canceled (interrupted, or a confirmation was declined)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -56,6 +72,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newSignupCmd())
+	rootCmd.AddCommand(newWhoamiCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDeployCmd())
 	rootCmd.AddCommand(newStatusCmd())
