@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/client"
 	"github.com/stackdome/cli/internal/cmdutil"
+	clierrors "github.com/stackdome/cli/internal/errors"
 	"github.com/stackdome/cli/internal/output"
 )
 
@@ -149,10 +150,14 @@ func newReleaseEventsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				var streamErr error
 				for e := range events {
 					printReleaseEventLine(os.Stdout, e)
+					if e.Event == "error" {
+						streamErr = clierrors.New(e.Data)
+					}
 				}
-				return nil
+				return streamErr
 			}
 
 			events, err := ctx.Client.ListReleaseEvents(cmd.Context(), stackID, args[0], 0)

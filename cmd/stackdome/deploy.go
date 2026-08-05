@@ -48,22 +48,22 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 
+			// Apply only stores the document; the release is what rolls it
+			// out. Its id is the one --wait follows — never a pre-existing one.
+			release, err := ctx.Client.CreateRelease(cmd.Context(), *result.Id)
+			if err != nil {
+				return err
+			}
+
 			if !flagWait {
-				fmt.Fprintf(os.Stderr, "\nStack %q submitted. Track progress with:\n", result.Name)
-				fmt.Fprintf(os.Stderr, "  stackdome status          # current state\n")
+				fmt.Fprintf(os.Stderr, "\nRelease #%d for stack %q submitted. Track progress with:\n", release.GetSequence(), result.Name)
+				fmt.Fprintf(os.Stderr, "  stackdome release events %s -f\n", release.GetId())
 				fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")
 				fmt.Fprintf(os.Stderr, "  stackdome logs            # stream logs\n")
 				return nil
 			}
 
-			// Follow the release this apply produced — never whatever release
-			// happened to be newest before it.
-			releaseID, err := appliedReleaseID(ctx, cmd, result)
-			if err != nil {
-				return err
-			}
-
-			waitErr := followRelease(ctx, cmd, *result.Id, releaseID)
+			waitErr := followRelease(ctx, cmd, *result.Id, release.GetId())
 
 			if err := printFinalStack(ctx, cmd, *result.Id); err != nil && waitErr == nil {
 				return err
@@ -140,23 +140,6 @@ func loadStack(path, nameOverride string) (*openapi.Stack, error) {
 	}
 }
 
-// appliedReleaseID identifies the release the apply just created. The apply
-// response carries it when the server populates latest_release; otherwise we
-// read the newest release for the stack.
-func appliedReleaseID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stack *openapi.Stack) (string, error) {
-	if rel := stack.LatestRelease; rel != nil && rel.Id != nil {
-		return *rel.Id, nil
-	}
-	rel, err := ctx.Client.LatestRelease(cmd.Context(), *stack.Id)
-	if err != nil {
-		return "", err
-	}
-	if rel == nil || rel.Id == nil {
-		return "", clierrors.New("Stack applied but no release was created.")
-	}
-	return *rel.Id, nil
-}
-
 // followRelease streams a release's events to stderr and resolves its outcome.
 // A release that did not reach Released is an error, so `deploy --wait` exits
 // non-zero on a failed deploy.
@@ -169,7 +152,7 @@ func followRelease(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, rel
 		printReleaseEventLine(os.Stderr, e)
 	}
 	if cmd.Context().Err() != nil {
-		return clierrors.New("Interrupted")
+		return clierrors.ErrUserCanceled
 	}
 
 	release, err := ctx.Client.GetRelease(cmd.Context(), stackID, releaseID)

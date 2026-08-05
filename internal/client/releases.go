@@ -30,6 +30,18 @@ func (c *Client) ListReleases(ctx context.Context, stackID string) ([]openapi.St
 	return resp.Items, nil
 }
 
+// CreateRelease starts a new release from the stack's current document. An
+// apply only stores the document — this is what actually rolls it out.
+func (c *Client) CreateRelease(ctx context.Context, stackID string) (*openapi.StackRelease, error) {
+	resp, httpResp, err := c.apiClient.ReleasesApi.
+		CreateRelease(ctx, c.orgID, c.projectName, stackID).
+		CreateReleaseRequest(openapi.CreateReleaseRequest{}).Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to create release")
+	}
+	return resp, nil
+}
+
 func (c *Client) GetRelease(ctx context.Context, stackID, releaseID string) (*openapi.StackReleaseDetail, error) {
 	resp, httpResp, err := c.apiClient.ReleasesApi.
 		GetRelease(ctx, c.orgID, c.projectName, stackID, releaseID).Execute()
@@ -56,19 +68,6 @@ func (c *Client) ListReleaseEvents(ctx context.Context, stackID, releaseID strin
 		return nil, WrapError(httpResp, err, "Failed to list release events")
 	}
 	return resp.Items, nil
-}
-
-// LatestRelease returns the newest release for a stack (the list is ordered by
-// sequence DESC), or nil when the stack has never released.
-func (c *Client) LatestRelease(ctx context.Context, stackID string) (*openapi.StackRelease, error) {
-	releases, err := c.ListReleases(ctx, stackID)
-	if err != nil {
-		return nil, err
-	}
-	if len(releases) == 0 {
-		return nil, nil
-	}
-	return &releases[0], nil
 }
 
 // errStreamEnd marks the server's terminal `event: end` — a clean close, not a
@@ -131,7 +130,10 @@ func (c *Client) StreamReleaseEvents(ctx context.Context, stackID, releaseID str
 				attempts++
 			}
 			if attempts > maxReconnectAttempts {
-				out <- SSEEvent{Event: "error", Data: "lost connection to release event stream"}
+				select {
+				case out <- SSEEvent{Event: "error", Data: "lost connection to release event stream"}:
+				case <-ctx.Done():
+				}
 				return
 			}
 			if attempts > 1 {
