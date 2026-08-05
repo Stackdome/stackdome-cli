@@ -44,19 +44,23 @@ func FindComposeFile(dir string) string {
 	return ""
 }
 
-func FromCompose(path, appName string) (*Stackfile, error) {
+// FromCompose converts a docker-compose file into a stackfile. The second
+// return value maps resource name -> the compose `env_file` it referenced:
+// yaml.Marshal of a Stackfile cannot emit that key, so the caller reports them
+// instead of dropping them silently.
+func FromCompose(path, appName string) (*Stackfile, map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	var compose composeFile
 	if err := yaml.Unmarshal(data, &compose); err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+		return nil, nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 
 	if len(compose.Services) == 0 {
-		return nil, fmt.Errorf("no services found in %s", path)
+		return nil, nil, fmt.Errorf("no services found in %s", path)
 	}
 
 	sf := &Stackfile{
@@ -64,10 +68,13 @@ func FromCompose(path, appName string) (*Stackfile, error) {
 		Resources: make(map[string]Resource),
 		Volumes:   make(map[string]VolumeDef),
 	}
+	envFiles := make(map[string]string)
 
 	for name, svc := range compose.Services {
-		res := convertService(svc)
-		sf.Resources[name] = res
+		sf.Resources[name] = convertService(svc)
+		if ref := parseEnvFileRef(svc.EnvFile); ref != "" {
+			envFiles[name] = ref
+		}
 	}
 
 	for volName := range compose.Volumes {
@@ -76,7 +83,7 @@ func FromCompose(path, appName string) (*Stackfile, error) {
 
 	collectNamedVolumes(sf)
 
-	return sf, nil
+	return sf, envFiles, nil
 }
 
 func convertService(svc composeService) Resource {
@@ -87,13 +94,8 @@ func convertService(svc composeService) Resource {
 	res.Command, res.Args = parseCommandArgs(svc.Entrypoint, svc.Command)
 	res.Ports = parsePorts(svc.Ports)
 	res.Env = parseEnvironment(svc.Environment)
-	res.EnvFile = parseEnvFileRef(svc.EnvFile)
 	res.Volumes = parseVolumeMounts(svc.Volumes)
 	res.DependsOn = parseDependsOn(svc.DependsOn)
-
-	if hasStatefulVolume(svc.Volumes) {
-		res.Stateful = true
-	}
 
 	return res
 }
@@ -403,19 +405,6 @@ func parseDependsOn(raw any) []string {
 		return deps
 	}
 	return nil
-}
-
-func hasStatefulVolume(volumes []string) bool {
-	for _, v := range volumes {
-		parts := strings.SplitN(v, ":", 3)
-		if len(parts) >= 2 {
-			source := parts[0]
-			if !strings.HasPrefix(source, "/") && !strings.HasPrefix(source, ".") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func collectNamedVolumes(sf *Stackfile) {

@@ -134,13 +134,13 @@ func loadStack(path, nameOverride string) (*openapi.Stack, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := stackfile.ResolveEnvFiles(sf, filepath.Dir(path)); err != nil {
-			return nil, err
-		}
 		if nameOverride != "" {
 			sf.Name = nameOverride
 		}
-		stack := sf.ToStack()
+		stack, err := sf.ToStack()
+		if err != nil {
+			return nil, clierrors.Wrap(err, "Failed to convert stackfile")
+		}
 		return &stack, nil
 
 	default:
