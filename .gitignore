@@ -1,2 +1,7 @@
 bin/
 .vscode/stackdome
+.env
+/stackdome
+/stackfile.yaml
+/docs/superpowers/
+HANDOVER.md

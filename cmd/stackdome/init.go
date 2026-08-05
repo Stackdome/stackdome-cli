@@ -25,8 +25,9 @@ resources:
         subdomain: web
     env:
       APP_ENV: "production"
+      PUBLIC_URL: "{{ self.public_url }}"
       DB_HOST: "{{ db.host }}"
-      DB_URL: "postgres://{{ db.host }}:{{ db.port.postgres }}/mydb"
+      DB_URL: "postgres://{{ db.host }}:{{ db.port }}/mydb"
       REDIS_URL: "redis://{{ redis.host }}:6379"
     # secrets:
     #   my-secret:
@@ -45,7 +46,6 @@ resources:
     volumes:
       - name: db-data
         path: /var/lib/postgresql/data
-    stateful: true
 
   redis:
     image: redis:7-alpine
@@ -100,7 +100,7 @@ If no compose file is found, a starter template is generated.`,
 
 			var content []byte
 			if composePath != "" {
-				sf, err := stackfile.FromCompose(composePath, name)
+				sf, envFiles, err := stackfile.FromCompose(composePath, name)
 				if err != nil {
 					return clierrors.Wrap(err, "Failed to convert compose file")
 				}
@@ -131,7 +131,7 @@ If no compose file is found, a starter template is generated.`,
 				}
 				fmt.Fprintln(os.Stderr)
 
-				warnings := checkConvertedStackfile(sf)
+				warnings := checkConvertedStackfile(sf, envFiles)
 				if len(warnings) > 0 {
 					for _, w := range warnings {
 						fmt.Fprintf(os.Stderr, "  %s %s\n", output.Yellow("!"), w)
@@ -166,7 +166,7 @@ If no compose file is found, a starter template is generated.`,
 	return cmd
 }
 
-func checkConvertedStackfile(sf *stackfile.Stackfile) []string {
+func checkConvertedStackfile(sf *stackfile.Stackfile, envFiles map[string]string) []string {
 	var warnings []string
 	for name, res := range sf.Resources {
 		if res.Build != nil && res.Build.Repo == "" {
@@ -175,8 +175,8 @@ func checkConvertedStackfile(sf *stackfile.Stackfile) []string {
 		if res.Image == "" && res.Build == nil {
 			warnings = append(warnings, fmt.Sprintf("resource %q has no image or build config", name))
 		}
-		if res.EnvFile != "" {
-			warnings = append(warnings, fmt.Sprintf("resource %q uses env_file %q — ensure it exists relative to the stackfile", name, res.EnvFile))
+		if ref, ok := envFiles[name]; ok {
+			warnings = append(warnings, fmt.Sprintf("resource %q used env_file %q in compose — add `env_file: %s` under it to load those vars at deploy", name, ref, ref))
 		}
 	}
 	return warnings

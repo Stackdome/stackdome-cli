@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"net/http"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
-func (c *Client) ListVolumes(ctx context.Context) ([]openapi.Volume, error) {
-	url := fmt.Sprintf("%s/api/v1/organizations/%s/teams/%s/volumes/current", c.baseURL, c.orgID, c.teamName)
+// ListVolumes lists the volumes of a stack.
+//
+// Hand-rolled on purpose: `GET .../stacks/{id}/volumes` exists in the router but
+// is missing from the OpenAPI spec (config/openapi/stackdome_api.yaml), so the
+// generated client has no method for it. The generated client only exposes
+// project-level volume POST/GET-by-id/DELETE. Replace this once the spec gains
+// the list operation.
+func (c *Client) ListVolumes(ctx context.Context, stackID string) ([]openapi.Volume, error) {
+	url := fmt.Sprintf("%s/api/v1/organizations/%s/projects/%s/stacks/%s/volumes", c.baseURL, c.orgID, c.projectName, stackID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -42,9 +49,26 @@ func (c *Client) ListVolumes(ctx context.Context) ([]openapi.Volume, error) {
 	return list.GetItems(), nil
 }
 
+func (c *Client) CreateVolume(ctx context.Context, name, size, accessMode string) (*openapi.Volume, error) {
+	volume := openapi.Volume{
+		Name: name,
+		Spec: openapi.VolumeSpec{
+			Size:       size,
+			AccessMode: openapi.VolumeAccessMode(accessMode),
+		},
+	}
+	resp, httpResp, err := c.apiClient.DefaultApi.
+		ApiV1OrganizationsOrgIdProjectsProjectNameVolumesPost(ctx, c.orgID, c.projectName).
+		Volume(volume).Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to create volume")
+	}
+	return resp, nil
+}
+
 func (c *Client) DeleteVolume(ctx context.Context, volumeID string) error {
 	httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameVolumesIdDelete(ctx, c.orgID, c.teamName, volumeID).
+		ApiV1OrganizationsOrgIdProjectsProjectNameVolumesIdDelete(ctx, c.orgID, c.projectName, volumeID).
 		Execute()
 	if err != nil {
 		return WrapError(httpResp, err, "Failed to delete volume")
@@ -52,8 +76,8 @@ func (c *Client) DeleteVolume(ctx context.Context, volumeID string) error {
 	return nil
 }
 
-func (c *Client) FindVolumeByName(ctx context.Context, name string) (*openapi.Volume, error) {
-	volumes, err := c.ListVolumes(ctx)
+func (c *Client) FindVolumeByName(ctx context.Context, stackID, name string) (*openapi.Volume, error) {
+	volumes, err := c.ListVolumes(ctx, stackID)
 	if err != nil {
 		return nil, err
 	}

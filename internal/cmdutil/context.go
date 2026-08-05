@@ -23,16 +23,21 @@ func NewCommandContext(cfg *config.Config, format output.Format, logLevel slog.L
 
 	var c *client.Client
 	if cfg.IsLoggedIn() {
-		c = client.New(cfg.ServerURL,
+		opts := []client.Option{
 			client.WithTokens(cfg.AccessToken, cfg.RefreshToken),
-			client.WithOrgAndTeam(cfg.OrganizationID, cfg.TeamName),
+			client.WithOrgAndProject(cfg.OrganizationID, cfg.ProjectName),
 			client.WithInsecure(cfg.Insecure),
-			client.WithTokenRefreshCallback(func(accessToken, refreshToken string) error {
+		}
+		// An env token has no refresh token behind it, and persisting one
+		// would write ephemeral credentials to disk.
+		if !cfg.TokenFromEnv() {
+			opts = append(opts, client.WithTokenRefreshCallback(func(accessToken, refreshToken string) error {
 				cfg.AccessToken = accessToken
 				cfg.RefreshToken = refreshToken
 				return cfg.Save()
-			}),
-		)
+			}))
+		}
+		c = client.New(cfg.ServerURL, opts...)
 	}
 
 	return &CommandContext{

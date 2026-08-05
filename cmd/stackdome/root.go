@@ -24,7 +24,24 @@ func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "stackdome",
 		Short:         "CLI for the Stackdome platform",
-		Long:          "Deploy, manage, and monitor your applications on Stackdome.",
+		Long: `Deploy, manage, and monitor your applications on Stackdome.
+
+Every command runs non-interactively: pass --yes to skip confirmations,
+STACKDOME_TOKEN (and STACKDOME_URL) to authenticate without a config file, and
+-o json|yaml for machine-readable output. A token scoped too narrowly to look up
+projects can name its scope directly with STACKDOME_ORG and STACKDOME_PROJECT. In -o json/yaml mode stdout carries
+only the result object; all prose, prompts, and progress go to stderr.
+
+Run ` + "`stackdome whoami`" + ` first to verify credentials.
+
+Exit codes:
+  0    success
+  1    general error
+  2    authentication / authorization failure
+  3    not found
+  4    invalid input or usage
+  5    conflict (already exists, or state does not allow the operation)
+  130  canceled (interrupted, or a confirmation was declined)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -56,6 +73,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newLoginCmd())
 	rootCmd.AddCommand(newLogoutCmd())
 	rootCmd.AddCommand(newSignupCmd())
+	rootCmd.AddCommand(newWhoamiCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newDeployCmd())
 	rootCmd.AddCommand(newStatusCmd())
@@ -64,14 +82,40 @@ func newRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newStackCmd())
 	rootCmd.AddCommand(newLogsCmd())
 	rootCmd.AddCommand(newBuildCmd())
+	rootCmd.AddCommand(newReleaseCmd())
 	rootCmd.AddCommand(newRestartCmd())
 	rootCmd.AddCommand(newOpenCmd())
 	rootCmd.AddCommand(newSecretCmd())
 	rootCmd.AddCommand(newVolumeCmd())
+	rootCmd.AddCommand(newAddonCmd())
+	rootCmd.AddCommand(newTokenCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newCompletionCmd())
 
+	// Usage errors exit 4, as the help text above promises. Cobra reports bad
+	// flags and bad arg counts as plain errors, which would otherwise exit 1.
+	rootCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return clierrors.ValidationError(err.Error())
+	})
+	wrapArgErrors(rootCmd)
+
 	return rootCmd
+}
+
+func wrapArgErrors(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		wrapArgErrors(sub)
+	}
+	if cmd.Args == nil {
+		return
+	}
+	inner := cmd.Args
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		if err := inner(c, args); err != nil {
+			return clierrors.ValidationError(err.Error())
+		}
+		return nil
+	}
 }
 
 func run() int {

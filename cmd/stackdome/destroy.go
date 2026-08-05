@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
@@ -20,13 +18,9 @@ func newDestroyCmd() *cobra.Command {
 		Use:   "destroy",
 		Short: "Delete the current stack",
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			stackID := flagStack
-			if stackID == "" {
-				var err error
-				stackID, err = ctx.Config.RequireStack()
-				if err != nil {
-					return err
-				}
+			stackID, err := resolveStackID(ctx, cmd, flagStack)
+			if err != nil {
+				return err
 			}
 
 			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
@@ -34,14 +28,9 @@ func newDestroyCmd() *cobra.Command {
 				return err
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "This will permanently delete stack %q. Type the stack name to confirm: ", stack.Name)
-				scanner := bufio.NewScanner(os.Stdin)
-				scanner.Scan()
-				if strings.TrimSpace(scanner.Text()) != stack.Name {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			prompt := fmt.Sprintf("This will permanently delete stack %q. Continue?", stack.Name)
+			if _, err := cmdutil.Confirm(ctx.Formatter, prompt, flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteStack(cmd.Context(), stackID); err != nil {
@@ -49,8 +38,7 @@ func newDestroyCmd() *cobra.Command {
 			}
 
 			if ctx.Config.CurrentStack == stackID {
-				ctx.Config.CurrentStack = ""
-				_ = ctx.Config.Save()
+				_ = ctx.Config.SetCurrentStack("")
 			}
 
 			fmt.Fprintf(os.Stderr, "Stack %q deletion initiated.\n", stack.Name)
@@ -59,7 +47,7 @@ func newDestroyCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation")
-	cmd.Flags().StringVar(&flagStack, "stack", "", "Stack ID (overrides current context)")
+	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 
 	return cmd
 }

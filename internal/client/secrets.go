@@ -3,12 +3,12 @@ package client
 import (
 	"context"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 )
 
 func (c *Client) ListSecrets(ctx context.Context) ([]openapi.Secret, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameSecretsGet(ctx, c.orgID, c.teamName).
+		ApiV1OrganizationsOrgIdProjectsProjectNameSecretsGet(ctx, c.orgID, c.projectName).
 		Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to list secrets")
@@ -18,7 +18,7 @@ func (c *Client) ListSecrets(ctx context.Context) ([]openapi.Secret, error) {
 
 func (c *Client) GetSecret(ctx context.Context, secretID string) (*openapi.Secret, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameSecretsIdGet(ctx, c.orgID, c.teamName, secretID).
+		ApiV1OrganizationsOrgIdProjectsProjectNameSecretsIdGet(ctx, c.orgID, c.projectName, secretID).
 		Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to get secret")
@@ -28,7 +28,7 @@ func (c *Client) GetSecret(ctx context.Context, secretID string) (*openapi.Secre
 
 func (c *Client) CreateSecret(ctx context.Context, secret openapi.Secret) (*openapi.Secret, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameSecretsPost(ctx, c.orgID, c.teamName).
+		ApiV1OrganizationsOrgIdProjectsProjectNameSecretsPost(ctx, c.orgID, c.projectName).
 		Secret(secret).Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to create secret")
@@ -38,7 +38,7 @@ func (c *Client) CreateSecret(ctx context.Context, secret openapi.Secret) (*open
 
 func (c *Client) UpdateSecret(ctx context.Context, secretID string, secret openapi.Secret) (*openapi.Secret, error) {
 	resp, httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameSecretsIdPut(ctx, c.orgID, c.teamName, secretID).
+		ApiV1OrganizationsOrgIdProjectsProjectNameSecretsIdPut(ctx, c.orgID, c.projectName, secretID).
 		Secret(secret).Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to update secret")
@@ -48,7 +48,7 @@ func (c *Client) UpdateSecret(ctx context.Context, secretID string, secret opena
 
 func (c *Client) DeleteSecret(ctx context.Context, secretID string) error {
 	httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdTeamsTeamNameSecretsIdDelete(ctx, c.orgID, c.teamName, secretID).
+		ApiV1OrganizationsOrgIdProjectsProjectNameSecretsIdDelete(ctx, c.orgID, c.projectName, secretID).
 		Execute()
 	if err != nil {
 		return WrapError(httpResp, err, "Failed to delete secret")

@@ -1,16 +1,23 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
+	"strings"
+	"sync"
 	"time"
 
-	serverapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
@@ -22,7 +29,7 @@ type Client struct {
 	accessToken    string
 	refreshToken   string
 	orgID          string
-	teamName       string
+	projectName    string
 	baseURL        string
 	onTokenRefresh func(accessToken, refreshToken string) error
 }
@@ -49,10 +56,10 @@ func WithTokens(accessToken, refreshToken string) Option {
 	}
 }
 
-func WithOrgAndTeam(orgID, teamName string) Option {
+func WithOrgAndProject(orgID, projectName string) Option {
 	return func(c *Client) {
 		c.orgID = orgID
-		c.teamName = teamName
+		c.projectName = projectName
 	}
 }
 
@@ -81,9 +88,118 @@ func New(baseURL string, opts ...Option) *Client {
 		opt(c)
 	}
 
+	base := cfg.HTTPClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	cfg.HTTPClient.Transport = &refreshTransport{base: base, client: c}
+
 	c.apiClient = serverapi.NewAPIClient(cfg)
 	c.applyAuth()
 	return c
+}
+
+// noRetryKey marks the refresh call itself, so a 401 on it cannot recurse.
+type noRetryKey struct{}
+
+// refreshTransport turns a 401 into one refresh + one retry. The server rotates
+// the refresh token on every use, so the new pair is persisted immediately.
+type refreshTransport struct {
+	base   http.RoundTripper
+	client *Client
+	mu     sync.Mutex
+}
+
+func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || !shouldRefresh(resp) {
+		return resp, err
+	}
+	if req.Context().Value(noRetryKey{}) != nil || !t.client.canRefresh() {
+		return resp, nil
+	}
+
+	// Buffer the body up front: a request we cannot replay is not retryable.
+	var body io.ReadCloser
+	if req.Body != nil {
+		if req.GetBody == nil {
+			return resp, nil
+		}
+		if body, err = req.GetBody(); err != nil {
+			return resp, nil
+		}
+	}
+
+	stale := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	t.mu.Lock()
+	// Skip if a concurrent request already rotated the pair — reusing a spent
+	// refresh token would revoke the session.
+	if t.client.accessToken == stale {
+		err = t.client.TryRefreshToken(context.WithValue(req.Context(), noRetryKey{}, true))
+	}
+	token := t.client.accessToken
+	t.mu.Unlock()
+
+	// A persist failure is not a refresh failure: the pair already rotated and
+	// the old refresh token is revoked server-side, so retrying with the live
+	// token is strictly better than failing a command with valid credentials.
+	if errors.Is(err, errPersistTokens) {
+		fmt.Fprintf(os.Stderr, "warning: %v; you may need to log in again\n", err)
+	} else if err != nil || token == stale {
+		if body != nil {
+			body.Close()
+		}
+		return resp, nil
+	}
+
+	resp.Body.Close()
+	retry := req.Clone(req.Context())
+	retry.Body = body
+	retry.Header.Set("Authorization", "Bearer "+token)
+	return t.base.RoundTrip(retry)
+}
+
+// tokenReason matches the server's wording for an expired or unparseable access
+// token — same patterns the web UI refreshes on.
+var tokenReason = regexp.MustCompile(`(?i)token parse error|token (is )?expired|expired by`)
+
+// shouldRefresh reports whether resp is an access-token rejection worth one
+// refresh + retry.
+//
+// Server contract: expired/invalid access tokens return 403 with a token reason
+// (matches web UI's shouldRefresh — frontend/src/api/client.ts). A 403 therefore
+// only counts when the body says so; genuine permission denials fall through
+// with their body buffered and restored, byte-identical for error rendering.
+func shouldRefresh(resp *http.Response) bool {
+	if resp.StatusCode == http.StatusUnauthorized {
+		return true
+	}
+	if resp.StatusCode != http.StatusForbidden || resp.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	var apiErr struct {
+		Reason string `json:"reason"`
+		Items  []struct {
+			Reason string `json:"reason"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(body, &apiErr)
+	if len(apiErr.Items) > 0 && tokenReason.MatchString(apiErr.Items[0].Reason) {
+		return true
+	}
+	return tokenReason.MatchString(apiErr.Reason)
+}
+
+// canRefresh reports whether a refresh is even meaningful: env tokens and
+// `sdm_` personal access tokens come without a refresh pair.
+func (c *Client) canRefresh() bool {
+	return c.refreshToken != "" && !strings.HasPrefix(c.accessToken, "sdm_")
 }
 
 func (c *Client) API() *serverapi.DefaultApiService {
@@ -102,16 +218,16 @@ func (c *Client) SetTokens(accessToken, refreshToken string) {
 	c.applyAuth()
 }
 
-func (c *Client) SetOrgAndTeam(orgID, teamName string) {
+func (c *Client) SetOrgAndProject(orgID, projectName string) {
 	c.orgID = orgID
-	c.teamName = teamName
+	c.projectName = projectName
 }
 
-func (c *Client) OrgID() string    { return c.orgID }
-func (c *Client) TeamName() string { return c.teamName }
+func (c *Client) OrgID() string       { return c.orgID }
+func (c *Client) ProjectName() string { return c.projectName }
 
-func (c *Client) TeamPath() string {
-	return fmt.Sprintf("/organizations/%s/teams/%s", c.orgID, c.teamName)
+func (c *Client) ProjectPath() string {
+	return fmt.Sprintf("/organizations/%s/projects/%s", c.orgID, c.projectName)
 }
 
 func (c *Client) TryRefreshToken(ctx context.Context) error {
@@ -130,10 +246,16 @@ func (c *Client) TryRefreshToken(ctx context.Context) error {
 	c.applyAuth()
 
 	if c.onTokenRefresh != nil {
-		return c.onTokenRefresh(c.accessToken, c.refreshToken)
+		if err := c.onTokenRefresh(c.accessToken, c.refreshToken); err != nil {
+			return fmt.Errorf("%w: %w", errPersistTokens, err)
+		}
 	}
 	return nil
 }
+
+// errPersistTokens marks the case where the refresh itself succeeded but saving
+// the rotated pair did not — the credentials in memory are still good.
+var errPersistTokens = errors.New("could not save refreshed credentials")
 
 func WrapError(httpResp *http.Response, err error, message string) error {
 	if httpResp != nil {

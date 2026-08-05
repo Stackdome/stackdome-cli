@@ -21,12 +21,45 @@ type Config struct {
 	AccessToken    string `json:"access_token,omitempty"`
 	RefreshToken   string `json:"refresh_token,omitempty"`
 	OrganizationID string `json:"organization_id,omitempty"`
-	TeamName       string `json:"team_name,omitempty"`
+	ProjectName    string `json:"project_name,omitempty"`
 	Username       string `json:"username,omitempty"`
 	CurrentStack   string `json:"current_stack,omitempty"`
 	Insecure       bool   `json:"insecure,omitempty"`
 
 	path string `json:"-"`
+
+	// What the file held and what the environment overrode it with, so Save
+	// can drop the ephemeral STACKDOME_URL / STACKDOME_TOKEN values — but only
+	// while they are still the values in play.
+	fileServerURL    string `json:"-"`
+	fileAccessToken  string `json:"-"`
+	fileRefreshToken string `json:"-"`
+	fileOrgID        string `json:"-"`
+	fileProjectName  string `json:"-"`
+	envServerURL     string `json:"-"`
+	envAccessToken   string `json:"-"`
+	envOrgID         string `json:"-"`
+	envProjectName   string `json:"-"`
+}
+
+// TokenFromEnv reports whether the access token in play is STACKDOME_TOKEN.
+// False once login/signup replaces it — that token is a real credential and
+// belongs on disk. Env tokens are not refreshable: no refresh token comes
+// with them, and they must never be written out.
+func (c *Config) TokenFromEnv() bool {
+	return c.envAccessToken != "" && c.AccessToken == c.envAccessToken
+}
+
+// AdoptEnvValues drops the env latches so Save writes the current values to
+// disk verbatim. login/signup call it: an explicit login must persist a full
+// config even when the values happen to equal STACKDOME_URL / STACKDOME_TOKEN.
+func (c *Config) AdoptEnvValues() {
+	c.envServerURL, c.envAccessToken = "", ""
+	c.envOrgID, c.envProjectName = "", ""
+}
+
+func (c *Config) urlFromEnv() bool {
+	return c.envServerURL != "" && c.ServerURL == c.envServerURL
 }
 
 func DefaultPath() (string, error) {
@@ -45,7 +78,39 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return LoadFrom(path)
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg.applyEnv()
+	return cfg, nil
+}
+
+// applyEnv overlays STACKDOME_URL / STACKDOME_TOKEN / STACKDOME_ORG /
+// STACKDOME_PROJECT on top of the file config. A token from the environment
+// stands alone: no refresh token comes with it. Org/project from the
+// environment let a scoped API token skip project discovery entirely.
+func (c *Config) applyEnv() {
+	c.fileServerURL, c.fileAccessToken, c.fileRefreshToken = c.ServerURL, c.AccessToken, c.RefreshToken
+	c.fileOrgID, c.fileProjectName = c.OrganizationID, c.ProjectName
+
+	if v := os.Getenv("STACKDOME_URL"); v != "" {
+		c.ServerURL = v
+		c.envServerURL = v
+	}
+	if v := os.Getenv("STACKDOME_TOKEN"); v != "" {
+		c.AccessToken = v
+		c.RefreshToken = ""
+		c.envAccessToken = v
+	}
+	if v := os.Getenv("STACKDOME_ORG"); v != "" {
+		c.OrganizationID = v
+		c.envOrgID = v
+	}
+	if v := os.Getenv("STACKDOME_PROJECT"); v != "" {
+		c.ProjectName = v
+		c.envProjectName = v
+	}
 }
 
 func LoadFrom(path string) (*Config, error) {
@@ -62,6 +127,17 @@ func LoadFrom(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, clierrors.Wrapf(err, "Failed to parse config from %s", path)
 	}
+
+	// Teams were renamed to projects; adopt the legacy key from older configs.
+	if cfg.ProjectName == "" {
+		var legacy struct {
+			TeamName string `json:"team_name"`
+		}
+		if json.Unmarshal(data, &legacy) == nil {
+			cfg.ProjectName = legacy.TeamName
+		}
+	}
+
 	cfg.path = path
 	return cfg, nil
 }
@@ -80,7 +156,23 @@ func (c *Config) Save() error {
 		return clierrors.Wrapf(err, "Failed to create config directory %s", dir)
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	// Env overrides are ephemeral — write back what the file had, unless
+	// login/signup has since replaced the value with a real credential.
+	out := *c
+	if c.urlFromEnv() {
+		out.ServerURL = c.fileServerURL
+	}
+	if c.TokenFromEnv() {
+		out.AccessToken, out.RefreshToken = c.fileAccessToken, c.fileRefreshToken
+	}
+	if c.envOrgID != "" && c.OrganizationID == c.envOrgID {
+		out.OrganizationID = c.fileOrgID
+	}
+	if c.envProjectName != "" && c.ProjectName == c.envProjectName {
+		out.ProjectName = c.fileProjectName
+	}
+
+	data, err := json.MarshalIndent(&out, "", "  ")
 	if err != nil {
 		return clierrors.Wrap(err, "Failed to serialize config")
 	}
@@ -124,6 +216,11 @@ func (c *Config) RequireStack() (string, error) {
 
 func (c *Config) SetCurrentStack(name string) error {
 	c.CurrentStack = name
+	// An env-token session is stateless by design: don't create (or fail on)
+	// a config file just to remember the stack for a process that's exiting.
+	if c.TokenFromEnv() {
+		return nil
+	}
 	return c.Save()
 }
 

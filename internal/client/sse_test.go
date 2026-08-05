@@ -100,3 +100,21 @@ func TestParseSSEStream_CallbackError(t *testing.T) {
 type testErr struct{ msg string }
 
 func (e *testErr) Error() string { return e.msg }
+
+func TestSSEEventIsEnd(t *testing.T) {
+	cases := []struct {
+		event SSEEvent
+		want  bool
+	}{
+		{SSEEvent{Event: "end", Data: "{}"}, true},
+		{SSEEvent{Event: "end"}, true},
+		{SSEEvent{Data: "{}"}, false}, // a log line that happens to be `{}` still prints
+		{SSEEvent{Data: "[web]: hello"}, false},
+		{SSEEvent{Data: ""}, false},
+	}
+	for _, c := range cases {
+		if got := c.event.IsEnd(); got != c.want {
+			t.Errorf("IsEnd(%+v) = %v, want %v", c.event, got, c.want)
+		}
+	}
+}

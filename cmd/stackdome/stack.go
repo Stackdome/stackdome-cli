@@ -49,8 +49,8 @@ func newStackListCmd() *cobra.Command {
 					marker = "*"
 				}
 				state := "Unknown"
-				if s.Status != nil && s.Status.State != nil {
-					state = *s.Status.State
+				if rel := output.StackRelease(&s); rel != nil && rel.State != nil {
+					state = string(*rel.State)
 				}
 				id := ""
 				if s.Id != nil {
@@ -82,7 +82,12 @@ func newStackInfoCmd() *cobra.Command {
 				return ctx.Formatter.PrintStructured(stack)
 			}
 
-			output.RenderStackStatus(os.Stdout, stack, true)
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			output.RenderStackStatus(os.Stdout, stack, live, true)
 			return nil
 		})),
 	}
@@ -104,14 +109,8 @@ func newStackDeleteCmd() *cobra.Command {
 				return clierrors.NotFoundError("Stack", args[0])
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "Delete stack %q? [y/N]: ", stack.Name)
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != "y" && confirm != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete stack %q?", stack.Name), flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteStack(cmd.Context(), *stack.Id); err != nil {
@@ -119,8 +118,7 @@ func newStackDeleteCmd() *cobra.Command {
 			}
 
 			if ctx.Config.CurrentStack == *stack.Id {
-				ctx.Config.CurrentStack = ""
-				_ = ctx.Config.Save()
+				_ = ctx.Config.SetCurrentStack("")
 			}
 
 			fmt.Fprintf(os.Stderr, "Stack %q deletion initiated.\n", stack.Name)

@@ -11,6 +11,13 @@ type SSEEvent struct {
 	Data  string
 }
 
+// IsEnd reports a stream terminator rather than payload. The server always
+// closes a stream with an "end" event (its payload happens to be `{}`, which
+// is what leaked into log output when the frame was printed).
+func (e SSEEvent) IsEnd() bool {
+	return e.Event == "end"
+}
+
 func ParseSSEStream(r io.Reader, fn func(SSEEvent) error) error {
 	scanner := bufio.NewScanner(r)
 	var event SSEEvent

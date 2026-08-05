@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	lgTable "github.com/charmbracelet/lipgloss/table"
+	clierrors "github.com/stackdome/cli/internal/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +29,7 @@ func ParseFormat(s string) (Format, error) {
 	case "yaml":
 		return FormatYAML, nil
 	default:
-		return "", fmt.Errorf("unknown output format %q (valid: table, json, yaml)", s)
+		return "", clierrors.ValidationError(fmt.Sprintf("unknown output format %q (valid: table, json, yaml)", s))
 	}
 }
 
@@ -50,11 +51,22 @@ func (f *Formatter) PrintJSON(v any) error {
 	return enc.Encode(v)
 }
 
+// PrintYAML routes through JSON first so the API types' `json:` tags decide the
+// key names — yaml.Marshal alone would emit lowercased Go field names.
 func (f *Formatter) PrintYAML(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	var generic any
+	if err := json.Unmarshal(b, &generic); err != nil {
+		return err
+	}
+
 	enc := yaml.NewEncoder(f.Writer)
 	enc.SetIndent(2)
 	defer enc.Close()
-	return enc.Encode(v)
+	return enc.Encode(generic)
 }
 
 func (f *Formatter) PrintStructured(v any) error {

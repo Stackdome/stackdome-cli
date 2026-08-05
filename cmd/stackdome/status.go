@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
 	"github.com/stackdome/cli/internal/output"
 )
 
@@ -21,22 +20,9 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status [resource]",
 		Short: "Show stack and resource status",
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			stackID := ""
-			if flagStack != "" {
-				s, err := ctx.Client.FindStackByName(cmd.Context(), flagStack)
-				if err != nil {
-					return err
-				}
-				if s == nil {
-					return clierrors.NotFoundError("Stack", flagStack)
-				}
-				stackID = *s.Id
-			} else {
-				var err error
-				stackID, err = ctx.Config.RequireStack()
-				if err != nil {
-					return err
-				}
+			stackID, err := resolveStackID(ctx, cmd, flagStack)
+			if err != nil {
+				return err
 			}
 
 			if flagWatch {
@@ -52,14 +38,19 @@ func newStatusCmd() *cobra.Command {
 				return ctx.Formatter.PrintStructured(stack)
 			}
 
-			output.RenderStackStatus(os.Stdout, stack, flagConditions)
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			output.RenderStackStatus(os.Stdout, stack, live, flagConditions)
 			return nil
 		})),
 	}
 
 	cmd.Flags().BoolVarP(&flagWatch, "watch", "w", false, "Live refresh")
 	cmd.Flags().BoolVar(&flagConditions, "conditions", false, "Show full condition history")
-	cmd.Flags().StringVar(&flagStack, "stack", "", "Stack name (overrides current context)")
+	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 
 	return cmd
 }
@@ -74,9 +65,25 @@ func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string
 			return err
 		}
 
-		// Clear screen
-		os.Stdout.WriteString("\033[2J\033[H")
-		output.RenderStackStatus(os.Stdout, stack, showConditions)
+		// Structured mode emits one object per tick — no redraw, no escape
+		// codes, so `status -w -o json` stays parseable as it streams.
+		if !ctx.Formatter.IsTable() {
+			if err := ctx.Formatter.PrintStructured(stack); err != nil {
+				return err
+			}
+		} else {
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			// Clear screen — only meaningful on a terminal; escape codes would
+			// otherwise corrupt piped/redirected output.
+			if output.IsTTY() {
+				os.Stdout.WriteString("\033[2J\033[H")
+			}
+			output.RenderStackStatus(os.Stdout, stack, live, showConditions)
+		}
 
 		select {
 		case <-cmd.Context().Done():

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
 	clierrors "github.com/stackdome/cli/internal/errors"
+	"github.com/stackdome/cli/internal/output"
 )
 
 func newOpenCmd() *cobra.Command {
@@ -18,6 +19,10 @@ func newOpenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "open [resource]",
 		Short: "Open a resource's public URL in the browser",
+		Long: `Open a resource's public URL in the browser.
+
+With -o json|yaml no browser is launched: the public URLs are printed to stdout
+as {"target": ..., "urls": [...]}.`,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
@@ -25,10 +30,18 @@ func newOpenCmd() *cobra.Command {
 				return err
 			}
 
-			resources, err := ctx.Client.GetStackResources(cmd.Context(), stackID)
+			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
 			if err != nil {
 				return err
 			}
+
+			// Public URLs live on the release status, not on the stack resources.
+			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+
+			resources := stack.Spec.StackResources
 
 			resourceFilter := ""
 			if len(args) > 0 {
@@ -36,8 +49,8 @@ func newOpenCmd() *cobra.Command {
 			}
 
 			type publicURL struct {
-				Resource string
-				URL      string
+				Resource string `json:"resource" yaml:"resource"`
+				URL      string `json:"url" yaml:"url"`
 			}
 
 			var urls []publicURL
@@ -45,10 +58,11 @@ func newOpenCmd() *cobra.Command {
 				if resourceFilter != "" && res.Name != resourceFilter {
 					continue
 				}
-				if res.Status == nil {
+				status := output.ResourceStatus(live, res.Name)
+				if status == nil {
 					continue
 				}
-				for _, ing := range res.Status.PublicIngress {
+				for _, ing := range status.PublicIngress {
 					if ing.Url != nil && *ing.Url != "" {
 						urls = append(urls, publicURL{Resource: res.Name, URL: *ing.Url})
 					}
@@ -73,6 +87,17 @@ func newOpenCmd() *cobra.Command {
 				return clierrors.New("No public URLs found in this stack")
 			}
 
+			target := urls[0].URL
+
+			// Structured mode is for scripts: report the URLs on stdout instead
+			// of launching a browser.
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(struct {
+					Target string      `json:"target" yaml:"target"`
+					URLs   []publicURL `json:"urls" yaml:"urls"`
+				}{Target: target, URLs: urls})
+			}
+
 			if len(urls) > 1 {
 				tbl := ctx.Formatter.NewTable("RESOURCE", "URL")
 				for _, u := range urls {
@@ -82,7 +107,6 @@ func newOpenCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr)
 			}
 
-			target := urls[0].URL
 			fmt.Fprintf(os.Stderr, "Opening %s...\n", target)
 			return openBrowser(target)
 		})),

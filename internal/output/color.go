@@ -24,12 +24,14 @@ func SetNoColor(v bool) {
 	noColor = v
 }
 
-func isTTY() bool {
+// IsTTY reports whether stdout is an interactive terminal. Guard anything that
+// only makes sense on a terminal (colors, screen clears, spinners) with it.
+func IsTTY() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 func colorize(color, text string) string {
-	if noColor || !isTTY() {
+	if noColor || !IsTTY() {
 		return text
 	}
 	return color + text + reset
@@ -52,11 +54,11 @@ func TabEscape(s string) string {
 
 func StateColor(state string) string {
 	switch state {
-	case "Ready":
+	case "Ready", "Released", "Running":
 		return Green(state)
-	case "Pending":
+	case "Pending", "InProgress", "Progressing":
 		return Yellow(state)
-	case "Failed", "Error":
+	case "Failed", "Error", "Degraded", "Unavailable":
 		return Red(state)
 	case "Deleting":
 		return Magenta(state)

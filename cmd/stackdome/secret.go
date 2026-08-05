@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	openapi "github.com/ashishmax31/stackdome-api-server/pkg/api/openapi"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
@@ -139,6 +139,10 @@ func newSecretCreateCmd() *cobra.Command {
 				return err
 			}
 
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(result)
+			}
+
 			fmt.Fprintf(os.Stderr, "Secret %q created.\n", result.Name)
 			return nil
 		})),
@@ -188,9 +192,13 @@ func newSecretSetCmd() *cobra.Command {
 				updated.Description = existing.Description
 			}
 
-			_, err = ctx.Client.UpdateSecret(cmd.Context(), *existing.Id, updated)
+			result, err := ctx.Client.UpdateSecret(cmd.Context(), *existing.Id, updated)
 			if err != nil {
 				return err
+			}
+
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(result)
 			}
 
 			fmt.Fprintf(os.Stderr, "Secret %q updated.\n", args[0])
@@ -220,14 +228,8 @@ func newSecretDeleteCmd() *cobra.Command {
 				return clierrors.NotFoundError("Secret", args[0])
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "Delete secret %q? [y/N]: ", args[0])
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != "y" && confirm != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete secret %q?", args[0]), flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteSecret(cmd.Context(), *secret.Id); err != nil {

@@ -27,7 +27,12 @@ func newConfigViewCmd() *cobra.Command {
 		Short: "Show current configuration",
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if !ctx.Formatter.IsTable() {
-				return ctx.Formatter.PrintStructured(ctx.Config)
+				// Redact on a copy: Save() marshals the same struct, so the
+				// tokens must stay intact on the real config.
+				view := *ctx.Config
+				view.AccessToken = redactSecret(view.AccessToken)
+				view.RefreshToken = redactSecret(view.RefreshToken)
+				return ctx.Formatter.PrintStructured(view)
 			}
 			fmt.Fprintln(os.Stdout, ctx.Config.Summary())
 			return nil
@@ -35,18 +40,35 @@ func newConfigViewCmd() *cobra.Command {
 	}
 }
 
+// redactSecret replaces a credential with a fixed marker: even a prefix is a
+// credential fragment, and structured output tends to end up in logs.
+func redactSecret(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "<redacted>"
+}
+
 func newConfigSetStackCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "set-stack <stack-id>",
-		Short: "Set the current stack context",
+		Use:   "set-stack <stack>",
+		Short: "Set the current stack context (name or ID)",
 		Args:  cobra.ExactArgs(1),
-		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			if err := ctx.Config.SetCurrentStack(args[0]); err != nil {
+		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			id, err := resolveStackRef(ctx, cmd, args[0])
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Current stack set to %s\n", args[0])
+			if err := ctx.Config.SetCurrentStack(id); err != nil {
+				return err
+			}
+			note := ""
+			if ctx.Config.TokenFromEnv() {
+				note = " — this session only, not persisted with env-token auth"
+			}
+			fmt.Fprintf(os.Stderr, "Current stack set to %s (%s)%s\n", args[0], id, note)
 			return nil
-		}),
+		})),
 	}
 }
 
@@ -65,7 +87,7 @@ func newConfigSetContextCmd() *cobra.Command {
 			ctx.Config.AccessToken = ""
 			ctx.Config.RefreshToken = ""
 			ctx.Config.OrganizationID = ""
-			ctx.Config.TeamName = ""
+			ctx.Config.ProjectName = ""
 			ctx.Config.Username = ""
 			ctx.Config.CurrentStack = ""
 
