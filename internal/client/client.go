@@ -5,9 +5,12 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
+	"sync"
 	"time"
 
 	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
@@ -81,9 +84,75 @@ func New(baseURL string, opts ...Option) *Client {
 		opt(c)
 	}
 
+	base := cfg.HTTPClient.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	cfg.HTTPClient.Transport = &refreshTransport{base: base, client: c}
+
 	c.apiClient = serverapi.NewAPIClient(cfg)
 	c.applyAuth()
 	return c
+}
+
+// noRetryKey marks the refresh call itself, so a 401 on it cannot recurse.
+type noRetryKey struct{}
+
+// refreshTransport turns a 401 into one refresh + one retry. The server rotates
+// the refresh token on every use, so the new pair is persisted immediately.
+type refreshTransport struct {
+	base   http.RoundTripper
+	client *Client
+	mu     sync.Mutex
+}
+
+func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+	if req.Context().Value(noRetryKey{}) != nil || !t.client.canRefresh() {
+		return resp, nil
+	}
+
+	// Buffer the body up front: a request we cannot replay is not retryable.
+	var body io.ReadCloser
+	if req.Body != nil {
+		if req.GetBody == nil {
+			return resp, nil
+		}
+		if body, err = req.GetBody(); err != nil {
+			return resp, nil
+		}
+	}
+
+	stale := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+	t.mu.Lock()
+	// Skip if a concurrent request already rotated the pair — reusing a spent
+	// refresh token would revoke the session.
+	if t.client.accessToken == stale {
+		err = t.client.TryRefreshToken(context.WithValue(req.Context(), noRetryKey{}, true))
+	}
+	token := t.client.accessToken
+	t.mu.Unlock()
+	if err != nil {
+		if body != nil {
+			body.Close()
+		}
+		return resp, nil
+	}
+
+	resp.Body.Close()
+	retry := req.Clone(req.Context())
+	retry.Body = body
+	retry.Header.Set("Authorization", "Bearer "+token)
+	return t.base.RoundTrip(retry)
+}
+
+// canRefresh reports whether a refresh is even meaningful: env tokens and
+// `sdm_` personal access tokens come without a refresh pair.
+func (c *Client) canRefresh() bool {
+	return c.refreshToken != "" && !strings.HasPrefix(c.accessToken, "sdm_")
 }
 
 func (c *Client) API() *serverapi.DefaultApiService {
