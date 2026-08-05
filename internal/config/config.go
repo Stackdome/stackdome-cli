@@ -27,7 +27,19 @@ type Config struct {
 	Insecure       bool   `json:"insecure,omitempty"`
 
 	path string `json:"-"`
+
+	// Values read from the config file, kept so Save never persists the
+	// ephemeral STACKDOME_URL / STACKDOME_TOKEN overrides.
+	fileServerURL    string `json:"-"`
+	fileAccessToken  string `json:"-"`
+	fileRefreshToken string `json:"-"`
+	urlFromEnv       bool   `json:"-"`
+	tokenFromEnv     bool   `json:"-"`
 }
+
+// TokenFromEnv reports whether the access token came from STACKDOME_TOKEN.
+// Env tokens are not refreshable — there is no refresh token to pair them with.
+func (c *Config) TokenFromEnv() bool { return c.tokenFromEnv }
 
 func DefaultPath() (string, error) {
 	if p := os.Getenv("STACKDOME_CONFIG"); p != "" {
@@ -45,7 +57,28 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return LoadFrom(path)
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg.applyEnv()
+	return cfg, nil
+}
+
+// applyEnv overlays STACKDOME_URL / STACKDOME_TOKEN on top of the file config.
+// A token from the environment stands alone: no refresh token comes with it.
+func (c *Config) applyEnv() {
+	c.fileServerURL, c.fileAccessToken, c.fileRefreshToken = c.ServerURL, c.AccessToken, c.RefreshToken
+
+	if v := os.Getenv("STACKDOME_URL"); v != "" {
+		c.ServerURL = v
+		c.urlFromEnv = true
+	}
+	if v := os.Getenv("STACKDOME_TOKEN"); v != "" {
+		c.AccessToken = v
+		c.RefreshToken = ""
+		c.tokenFromEnv = true
+	}
 }
 
 func LoadFrom(path string) (*Config, error) {
@@ -91,7 +124,16 @@ func (c *Config) Save() error {
 		return clierrors.Wrapf(err, "Failed to create config directory %s", dir)
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	// Env overrides are ephemeral — write back what the file had.
+	out := *c
+	if c.urlFromEnv {
+		out.ServerURL = c.fileServerURL
+	}
+	if c.tokenFromEnv {
+		out.AccessToken, out.RefreshToken = c.fileAccessToken, c.fileRefreshToken
+	}
+
+	data, err := json.MarshalIndent(&out, "", "  ")
 	if err != nil {
 		return clierrors.Wrap(err, "Failed to serialize config")
 	}

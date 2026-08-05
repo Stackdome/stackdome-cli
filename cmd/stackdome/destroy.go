@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stackdome/cli/internal/cmdutil"
@@ -34,14 +32,9 @@ func newDestroyCmd() *cobra.Command {
 				return err
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "This will permanently delete stack %q. Type the stack name to confirm: ", stack.Name)
-				scanner := bufio.NewScanner(os.Stdin)
-				scanner.Scan()
-				if strings.TrimSpace(scanner.Text()) != stack.Name {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			prompt := fmt.Sprintf("This will permanently delete stack %q. Continue?", stack.Name)
+			if _, err := cmdutil.Confirm(ctx.Formatter, prompt, flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteStack(cmd.Context(), stackID); err != nil {

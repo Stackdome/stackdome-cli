@@ -220,14 +220,8 @@ func newSecretDeleteCmd() *cobra.Command {
 				return clierrors.NotFoundError("Secret", args[0])
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "Delete secret %q? [y/N]: ", args[0])
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != "y" && confirm != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete secret %q?", args[0]), flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteSecret(cmd.Context(), *secret.Id); err != nil {

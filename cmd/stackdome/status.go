@@ -84,8 +84,11 @@ func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string
 			return err
 		}
 
-		// Clear screen
-		os.Stdout.WriteString("\033[2J\033[H")
+		// Clear screen — only meaningful on a terminal; escape codes would
+		// otherwise corrupt piped/redirected output.
+		if output.IsTTY() {
+			os.Stdout.WriteString("\033[2J\033[H")
+		}
 		output.RenderStackStatus(os.Stdout, stack, live, showConditions)
 
 		select {

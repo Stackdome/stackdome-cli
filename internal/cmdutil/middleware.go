@@ -28,8 +28,38 @@ func RequireAuth(fn RunEWithContext) RunEWithContext {
 		if err := ctx.Config.RequireAuth(); err != nil {
 			return err
 		}
+		if err := resolveScope(ctx, cmd); err != nil {
+			return err
+		}
 		return fn(ctx, cmd, args)
 	}
+}
+
+// resolveScope fills in the org/project the client scopes its calls to. With
+// STACKDOME_TOKEN and no config file there is nothing on disk to read them
+// from, so resolve them from the API once, in memory only.
+func resolveScope(ctx *CommandContext, cmd *cobra.Command) error {
+	if ctx.Config.OrganizationID != "" && ctx.Config.ProjectName != "" {
+		return nil
+	}
+
+	if ctx.Config.OrganizationID == "" {
+		user, err := ctx.Client.GetCurrentUser(cmd.Context())
+		if err != nil {
+			return err
+		}
+		ctx.Config.OrganizationID = user.GetOrganisationId()
+	}
+	if ctx.Config.ProjectName == "" {
+		name, err := ctx.Client.ResolveDefaultProject(cmd.Context())
+		if err != nil {
+			return err
+		}
+		ctx.Config.ProjectName = name
+	}
+
+	ctx.Client.SetOrgAndProject(ctx.Config.OrganizationID, ctx.Config.ProjectName)
+	return nil
 }
 
 func RequireStack(fn func(ctx *CommandContext, cmd *cobra.Command, args []string, stackName string) error) RunEWithContext {

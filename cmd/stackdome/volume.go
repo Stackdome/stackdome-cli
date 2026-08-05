@@ -89,14 +89,8 @@ func newVolumeDeleteCmd() *cobra.Command {
 				return clierrors.NotFoundError("Volume", args[0])
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "Delete volume %q? [y/N]: ", args[0])
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != "y" && confirm != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete volume %q?", args[0]), flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteVolume(cmd.Context(), *volume.Id); err != nil {

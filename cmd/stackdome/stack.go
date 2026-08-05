@@ -109,14 +109,8 @@ func newStackDeleteCmd() *cobra.Command {
 				return clierrors.NotFoundError("Stack", args[0])
 			}
 
-			if !flagYes {
-				fmt.Fprintf(os.Stderr, "Delete stack %q? [y/N]: ", stack.Name)
-				var confirm string
-				fmt.Scanln(&confirm)
-				if confirm != "y" && confirm != "Y" {
-					fmt.Fprintln(os.Stderr, "Aborted.")
-					return nil
-				}
+			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete stack %q?", stack.Name), flagYes); err != nil {
+				return err
 			}
 
 			if err := ctx.Client.DeleteStack(cmd.Context(), *stack.Id); err != nil {

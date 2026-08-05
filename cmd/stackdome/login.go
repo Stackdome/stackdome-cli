@@ -31,6 +31,11 @@ func newLoginCmd() *cobra.Command {
 				return clierrors.ValidationError("--url is required")
 			}
 
+			// Refuse to block on a prompt nobody can answer.
+			if flagToken == "" && (flagEmail == "" || flagPassword == "") && !term.IsTerminal(int(os.Stdin.Fd())) {
+				return clierrors.ValidationError("non-interactive login requires --token, or both --email and --password")
+			}
+
 			cfg, err := config.Load()
 			if err != nil {
 				return err

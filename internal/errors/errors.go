@@ -14,6 +14,14 @@ const (
 	ExitUserCanceled = 130
 )
 
+// ErrUserCanceled is returned when the user declines a confirmation prompt.
+// ExitCodeFrom maps it to 130, the conventional "interrupted by user" code.
+var ErrUserCanceled = &CLIError{
+	Message:  "Aborted.",
+	Code:     "USER_CANCELED",
+	ExitCode: ExitUserCanceled,
+}
+
 type CLIError struct {
 	Message  string
 	Detail   string
