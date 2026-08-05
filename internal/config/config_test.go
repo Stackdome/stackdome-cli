@@ -96,6 +96,37 @@ func TestLoginWhileEnvTokenSetPersistsNewToken(t *testing.T) {
 	if strings.Contains(string(data), "old_tok") {
 		t.Errorf("stale token persisted over the new one: %s", data)
 	}
+
+	// `STACKDOME_URL=X stackdome login --url X --token $STACKDOME_TOKEN` logs in
+	// with exactly the env values. Save's latch would read that as "still the
+	// ephemeral env value" and write an empty config, so login clears the latch.
+	t.Run("values identical to the environment", func(t *testing.T) {
+		path := writeConfig(t, `{}`)
+		t.Setenv("STACKDOME_CONFIG", path)
+		t.Setenv("STACKDOME_TOKEN", "sdm_abc")
+		t.Setenv("STACKDOME_URL", "https://hub.example")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.ServerURL = "https://hub.example"
+		cfg.AccessToken = "sdm_abc"
+		cfg.AdoptEnvValues()
+		if err := cfg.Save(); err != nil {
+			t.Fatal(err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"sdm_abc", "https://hub.example"} {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("expected %q in saved config: %s", want, data)
+			}
+		}
+	})
 }
 
 // An env-token session must not create or depend on a config file.

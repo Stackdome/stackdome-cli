@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestStreamBuildLogs pins the build-log URL (path + query) and the SSE frames
@@ -50,5 +51,41 @@ func TestStreamBuildLogs(t *testing.T) {
 	}
 	if !ended {
 		t.Error("missing end event")
+	}
+}
+
+// A followed log stream must outlive the client's whole-request timeout — only
+// the context ends it.
+func TestStreamLogsFollowOutlivesClientTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		time.Sleep(150 * time.Millisecond)
+		fmt.Fprint(w, "data: second\n\nevent: end\ndata: \n\n")
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, WithTokens("access", ""), WithOrgAndProject("org-1", "proj-1"))
+	c.cfg.HTTPClient.Timeout = 50 * time.Millisecond
+
+	stream, err := c.StreamLogs(context.Background(), "stack-1", "web", LogOptions{Follow: true, Tail: 10})
+	if err != nil {
+		t.Fatalf("StreamLogs: %v", err)
+	}
+	defer stream.Close()
+
+	var lines []string
+	if err := ParseSSEStream(stream, func(e SSEEvent) error {
+		if e.Event != "end" {
+			lines = append(lines, e.Data)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ParseSSEStream: %v", err)
+	}
+
+	if len(lines) != 2 || lines[1] != "second" {
+		t.Errorf("lines = %v, want [first second] — stream was cut by the client timeout", lines)
 	}
 }

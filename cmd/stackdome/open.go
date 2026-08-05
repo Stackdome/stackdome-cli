@@ -19,6 +19,10 @@ func newOpenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "open [resource]",
 		Short: "Open a resource's public URL in the browser",
+		Long: `Open a resource's public URL in the browser.
+
+With -o json|yaml no browser is launched: the public URLs are printed to stdout
+as {"target": ..., "urls": [...]}.`,
 		Args:  cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
@@ -45,8 +49,8 @@ func newOpenCmd() *cobra.Command {
 			}
 
 			type publicURL struct {
-				Resource string
-				URL      string
+				Resource string `json:"resource" yaml:"resource"`
+				URL      string `json:"url" yaml:"url"`
 			}
 
 			var urls []publicURL
@@ -83,6 +87,17 @@ func newOpenCmd() *cobra.Command {
 				return clierrors.New("No public URLs found in this stack")
 			}
 
+			target := urls[0].URL
+
+			// Structured mode is for scripts: report the URLs on stdout instead
+			// of launching a browser.
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(struct {
+					Target string      `json:"target" yaml:"target"`
+					URLs   []publicURL `json:"urls" yaml:"urls"`
+				}{Target: target, URLs: urls})
+			}
+
 			if len(urls) > 1 {
 				tbl := ctx.Formatter.NewTable("RESOURCE", "URL")
 				for _, u := range urls {
@@ -92,7 +107,6 @@ func newOpenCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr)
 			}
 
-			target := urls[0].URL
 			fmt.Fprintf(os.Stderr, "Opening %s...\n", target)
 			return openBrowser(target)
 		})),

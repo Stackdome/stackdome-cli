@@ -80,6 +80,7 @@ func loginWithToken(cmd *cobra.Command, cfg *config.Config, serverURL, token str
 	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(user)
 	cfg.Insecure = insecure
+	cfg.AdoptEnvValues()
 
 	if err := cfg.Save(); err != nil {
 		return err
@@ -116,6 +117,7 @@ func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, ema
 	cfg.ProjectName = projectName
 	cfg.Username = userDisplayName(result.User)
 	cfg.Insecure = insecure
+	cfg.AdoptEnvValues()
 
 	if err := cfg.Save(); err != nil {
 		return err

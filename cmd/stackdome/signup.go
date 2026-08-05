@@ -65,6 +65,7 @@ func newSignupCmd() *cobra.Command {
 			cfg.ProjectName = projectName
 			cfg.Username = userDisplayName(result.User)
 			cfg.Insecure = flagInsecure
+			cfg.AdoptEnvValues()
 
 			if err := cfg.Save(); err != nil {
 				return err

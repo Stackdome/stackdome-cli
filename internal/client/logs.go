@@ -45,9 +45,12 @@ func (c *Client) openLogStream(ctx context.Context, path string, opts LogOptions
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 	req.Header.Set("Accept", "text/event-stream")
 
-	httpClient := c.cfg.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	// `-f` follows a log stream indefinitely; reuse the configured transport (so
+	// token refresh still applies) but not its 30s whole-request timeout. The
+	// context governs the stream's lifetime.
+	httpClient := &http.Client{}
+	if c.cfg.HTTPClient != nil {
+		httpClient.Transport = c.cfg.HTTPClient.Transport
 	}
 
 	resp, err := httpClient.Do(req)

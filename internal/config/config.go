@@ -46,6 +46,13 @@ func (c *Config) TokenFromEnv() bool {
 	return c.envAccessToken != "" && c.AccessToken == c.envAccessToken
 }
 
+// AdoptEnvValues drops the env latches so Save writes the current values to
+// disk verbatim. login/signup call it: an explicit login must persist a full
+// config even when the values happen to equal STACKDOME_URL / STACKDOME_TOKEN.
+func (c *Config) AdoptEnvValues() {
+	c.envServerURL, c.envAccessToken = "", ""
+}
+
 func (c *Config) urlFromEnv() bool {
 	return c.envServerURL != "" && c.ServerURL == c.envServerURL
 }

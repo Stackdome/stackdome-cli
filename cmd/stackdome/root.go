@@ -91,7 +91,30 @@ Exit codes:
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newCompletionCmd())
 
+	// Usage errors exit 4, as the help text above promises. Cobra reports bad
+	// flags and bad arg counts as plain errors, which would otherwise exit 1.
+	rootCmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return clierrors.ValidationError(err.Error())
+	})
+	wrapArgErrors(rootCmd)
+
 	return rootCmd
+}
+
+func wrapArgErrors(cmd *cobra.Command) {
+	for _, sub := range cmd.Commands() {
+		wrapArgErrors(sub)
+	}
+	if cmd.Args == nil {
+		return
+	}
+	inner := cmd.Args
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		if err := inner(c, args); err != nil {
+			return clierrors.ValidationError(err.Error())
+		}
+		return nil
+	}
 }
 
 func run() int {

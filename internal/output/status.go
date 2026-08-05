@@ -33,13 +33,16 @@ func RenderStackStatus(w io.Writer, stack *openapi.Stack, live *openapi.ReleaseL
 	renderFailures(w, stack.Spec.StackResources, live, showConditions)
 }
 
-// StackRelease returns the release that describes the stack's current runtime
-// state: the latest one if there is one, otherwise the converged one.
+// StackRelease returns the release that describes what the stack is actually
+// serving: the converged one, falling back to the latest only when nothing has
+// converged yet. Must match client.GetStackLiveStatus, which picks the release
+// the resource rows come from — otherwise the header and the rows describe
+// different releases.
 func StackRelease(stack *openapi.Stack) *openapi.ReleaseSummary {
-	if stack.LatestRelease != nil {
-		return stack.LatestRelease
+	if stack.ConvergedRelease != nil {
+		return stack.ConvergedRelease
 	}
-	return stack.ConvergedRelease
+	return stack.LatestRelease
 }
 
 // ResourceStatus returns the live status of a named stack resource, if any.

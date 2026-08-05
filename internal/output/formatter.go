@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	lgTable "github.com/charmbracelet/lipgloss/table"
+	clierrors "github.com/stackdome/cli/internal/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +29,7 @@ func ParseFormat(s string) (Format, error) {
 	case "yaml":
 		return FormatYAML, nil
 	default:
-		return "", fmt.Errorf("unknown output format %q (valid: table, json, yaml)", s)
+		return "", clierrors.ValidationError(fmt.Sprintf("unknown output format %q (valid: table, json, yaml)", s))
 	}
 }
 

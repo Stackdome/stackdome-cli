@@ -26,6 +26,11 @@ func newDeployCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy",
 		Short: "Deploy a stack from a stackfile or JSON",
+		Long: `Deploy a stack from a stackfile or JSON.
+
+With -o json|yaml stdout carries {"stack": ..., "release": ...} — the release id
+is the one to follow with ` + "`stackdome release events <id> -f`" + `. With --wait
+the release object is the final one.`,
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			stack, err := loadStack(flagFile, flagName)
 			if err != nil {
@@ -57,7 +62,7 @@ func newDeployCmd() *cobra.Command {
 
 			if !flagWait {
 				if !ctx.Formatter.IsTable() {
-					return ctx.Formatter.PrintStructured(result)
+					return ctx.Formatter.PrintStructured(deployResult{Stack: result, Release: release})
 				}
 				fmt.Fprintf(os.Stderr, "\nRelease #%d for stack %q submitted. Track progress with:\n", release.GetSequence(), result.Name)
 				fmt.Fprintf(os.Stderr, "  stackdome release events %s -f\n", release.GetId())
@@ -66,9 +71,9 @@ func newDeployCmd() *cobra.Command {
 				return nil
 			}
 
-			waitErr := followRelease(ctx, cmd, *result.Id, release.GetId())
+			final, waitErr := followRelease(ctx, cmd, *result.Id, release.GetId())
 
-			if err := printFinalStack(ctx, cmd, *result.Id); err != nil && waitErr == nil {
+			if err := printFinalStack(ctx, cmd, *result.Id, final); err != nil && waitErr == nil {
 				return err
 			}
 			return waitErr
@@ -143,26 +148,34 @@ func loadStack(path, nameOverride string) (*openapi.Stack, error) {
 	}
 }
 
-// followRelease streams a release's events to stderr and resolves its outcome.
-// A release that did not reach Released is an error, so `deploy --wait` exits
+// deployResult is what `deploy -o json|yaml` prints: scripts need the release
+// id to follow events, which a bare stack does not carry.
+type deployResult struct {
+	Stack   *openapi.Stack `json:"stack" yaml:"stack"`
+	Release any            `json:"release" yaml:"release"`
+}
+
+// followRelease streams a release's events to stderr and resolves its outcome,
+// returning the final release (which may be non-nil alongside an error). A
+// release that did not reach Released is an error, so `deploy --wait` exits
 // non-zero on a failed deploy.
-func followRelease(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, releaseID string) error {
+func followRelease(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, releaseID string) (*openapi.StackReleaseDetail, error) {
 	events, err := ctx.Client.StreamReleaseEvents(cmd.Context(), stackID, releaseID, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for e := range events {
 		printReleaseEventLine(os.Stderr, e)
 	}
 	if cmd.Context().Err() != nil {
-		return clierrors.ErrUserCanceled
+		return nil, clierrors.ErrUserCanceled
 	}
 
 	release, err := ctx.Client.GetRelease(cmd.Context(), stackID, releaseID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return releaseOutcomeError(release)
+	return release, releaseOutcomeError(release)
 }
 
 func releaseOutcomeError(release *openapi.StackReleaseDetail) error {
@@ -215,13 +228,13 @@ func validationErrorLine(ve openapi.ReleaseValidationError) string {
 	return strings.TrimSpace(b.String())
 }
 
-func printFinalStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string) error {
+func printFinalStack(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string, release *openapi.StackReleaseDetail) error {
 	final, err := ctx.Client.GetStack(cmd.Context(), stackID)
 	if err != nil {
 		return err
 	}
 	if !ctx.Formatter.IsTable() {
-		return ctx.Formatter.PrintStructured(final)
+		return ctx.Formatter.PrintStructured(deployResult{Stack: final, Release: release})
 	}
 	live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), final)
 	if err != nil {
