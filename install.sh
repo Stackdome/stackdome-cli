@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs the latest stackdome CLI from GitHub releases.
-# Usage: curl -fsSL https://get.stackdome.com/cli | sh
+# Usage: curl -fsSL https://stackdome.com/cli | sh
 set -eu
 
 REPO="Stackdome/stackdome-cli"
