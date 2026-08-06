@@ -1,0 +1,20 @@
+version: 2
+
+builds:
+  - main: ./cmd/stackdome
+    binary: stackdome
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.Version={{.Version}} -X main.GitCommit={{.Commit}} -X main.BuildDate={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "stackdome_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  draft: false
