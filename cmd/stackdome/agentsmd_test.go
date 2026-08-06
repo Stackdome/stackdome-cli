@@ -17,7 +17,7 @@ func TestWriteAgentsStanza_CreatesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	if !strings.Contains(s, agentsStanzaBegin) || !strings.Contains(s, "docs.stackdome.io/guides/ai-agents") {
+	if !strings.Contains(s, agentsStanzaBegin) || !strings.Contains(s, "stackdome.mintlify.app/guides/ai-agents") {
 		t.Fatalf("stanza missing expected content:\n%s", s)
 	}
 }

@@ -18,8 +18,8 @@ const agentsStanza = agentsStanzaBegin + `
 
 This repo deploys to a Stackdome instance via the ` + "`stackdome`" + ` CLI.
 
-- Full agent guide: https://docs.stackdome.io/guides/ai-agents.md
-- Install CLI: ` + "`curl -fsSL https://get.stackdome.com/cli | sh`" + `
+- Full agent guide: https://stackdome.mintlify.app/guides/ai-agents.md
+- Install CLI: ` + "`curl -fsSL https://stackdome.com/cli | sh`" + `
 - Auth: ` + "`stackdome login --url <instance-url> --token <api-token>`" + ` (create tokens at ` + "`<instance-url>/settings/api-tokens`" + `)
 - Deploy: ` + "`stackdome validate && stackdome deploy`" + ` (stackfile.yaml defines the stack)
 - Inspect: ` + "`stackdome status -o json`" + `, ` + "`stackdome logs [resource]`" + `
