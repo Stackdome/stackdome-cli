@@ -18,7 +18,7 @@ case "$os" in
 esac
 
 tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
+  | grep '"tag_name"' | head -1 | cut -d '"' -f 4) || true
 [ -n "$tag" ] || { echo "error: could not resolve latest release" >&2; exit 1; }
 version=${tag#v}
 
