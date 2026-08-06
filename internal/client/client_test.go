@@ -273,6 +273,19 @@ func TestRefreshOn403TokenReason(t *testing.T) {
 	}
 }
 
+// An API-token session (no refresh pair) must not claim the session expired —
+// the token itself was rejected, so point at where to mint a new one.
+func TestTryRefreshToken_APITokenSession(t *testing.T) {
+	c := New("https://sd.example.com", WithTokens("sd_api_token", ""))
+	err := c.TryRefreshToken(context.Background())
+	if err == nil {
+		t.Fatal("expected error for API-token session")
+	}
+	if !strings.Contains(err.Error(), "https://sd.example.com/settings/api-tokens") {
+		t.Fatalf("error should point at token settings page, got: %v", err)
+	}
+}
+
 // A real permission denial is not an expired token: no refresh, and the body
 // must reach the caller verbatim so the reason still renders.
 func TestPlain403DoesNotRefresh(t *testing.T) {
