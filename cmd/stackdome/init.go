@@ -60,10 +60,9 @@ volumes:
 
 func newInitCmd() *cobra.Command {
 	var (
-		flagName     string
-		flagForce    bool
-		flagFile     string
-		flagAgentsMD bool
+		flagName  string
+		flagForce bool
+		flagFile  string
 	)
 
 	cmd := &cobra.Command{
@@ -156,7 +155,7 @@ If no compose file is found, a starter template is generated.`,
 				fmt.Fprintf(os.Stderr, "Created %s\n", outPath)
 			}
 
-			if flagAgentsMD && shouldWriteAgentsMD() {
+			if shouldWriteAgentsMD() {
 				if err := writeAgentsStanza("."); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not update AGENTS.md: %v\n", err)
 				} else {
@@ -171,7 +170,6 @@ If no compose file is found, a starter template is generated.`,
 	cmd.Flags().StringVar(&flagName, "name", "", "App name (defaults to current directory name)")
 	cmd.Flags().BoolVar(&flagForce, "force", false, "Overwrite existing stackfile.yaml")
 	cmd.Flags().StringVarP(&flagFile, "file", "f", "", "Path to docker-compose file to convert")
-	cmd.Flags().BoolVar(&flagAgentsMD, "agents-md", true, "Write a Stackdome section to AGENTS.md")
 
 	return cmd
 }

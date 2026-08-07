@@ -34,23 +34,13 @@ func writeAgentsStanza(dir string) error {
 	}
 	s := string(existing)
 
-	if i := strings.Index(s, agentsStanzaBegin); i >= 0 {
-		j := strings.Index(s, agentsStanzaEnd)
-		if j < 0 {
-			j = len(s)
-		} else {
-			j += len(agentsStanzaEnd)
-			if j < len(s) && s[j] == '\n' {
-				j++
-			}
-		}
-		s = s[:i] + agentsStanza + s[j:]
+	before, rest, found := strings.Cut(s, agentsStanzaBegin)
+	if found {
+		_, after, _ := strings.Cut(rest, agentsStanzaEnd)
+		s = before + agentsStanza + strings.TrimPrefix(after, "\n")
 	} else {
-		if s != "" && !strings.HasSuffix(s, "\n") {
-			s += "\n"
-		}
-		if s != "" {
-			s += "\n"
+		if s = strings.TrimRight(s, "\n"); s != "" {
+			s += "\n\n"
 		}
 		s += agentsStanza
 	}

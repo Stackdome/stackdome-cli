@@ -11,10 +11,7 @@ builds:
 
 archives:
   - formats: [tar.gz]
-    name_template: "stackdome_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "stackdome_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
-
-release:
-  draft: false

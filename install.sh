@@ -17,13 +17,8 @@ case "$os" in
   *) echo "error: unsupported OS: $os" >&2; exit 1 ;;
 esac
 
-tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep '"tag_name"' | head -1 | cut -d '"' -f 4) || true
-[ -n "$tag" ] || { echo "error: could not resolve latest release" >&2; exit 1; }
-version=${tag#v}
-
-asset="stackdome_${version}_${os}_${arch}.tar.gz"
-url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
+asset="stackdome_${os}_${arch}.tar.gz"
+url="https://github.com/${REPO}/releases/latest/download/${asset}"
 
 if [ -w /usr/local/bin ]; then
   bindir="/usr/local/bin"
@@ -34,7 +29,7 @@ fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-echo "Downloading stackdome ${tag} (${os}/${arch})..."
+echo "Downloading stackdome latest (${os}/${arch})..."
 curl -fsSL "$url" -o "${tmp}/${asset}"
 tar -xzf "${tmp}/${asset}" -C "$tmp" stackdome
 install -m 0755 "${tmp}/stackdome" "${bindir}/stackdome"
