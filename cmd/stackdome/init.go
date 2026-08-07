@@ -155,14 +155,6 @@ If no compose file is found, a starter template is generated.`,
 				fmt.Fprintf(os.Stderr, "Created %s\n", outPath)
 			}
 
-			if shouldWriteAgentsMD() {
-				if err := writeAgentsStanza("."); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not update AGENTS.md: %v\n", err)
-				} else {
-					fmt.Fprintln(os.Stderr, "Updated AGENTS.md with Stackdome instructions")
-				}
-			}
-
 			return nil
 		},
 	}
