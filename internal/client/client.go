@@ -231,9 +231,7 @@ func (c *Client) ProjectPath() string {
 }
 
 func (c *Client) TryRefreshToken(ctx context.Context) error {
-	// API-token sessions (env token, `sdm_` personal access token) have no
-	// refresh pair — a rejected access token means the API token itself is
-	// dead, not that the session needs a refresh.
+	// No refresh pair means an API-token session (env token, `sdm_` PAT).
 	if c.refreshToken == "" {
 		return clierrors.AuthError(fmt.Sprintf(
 			"API token was rejected (expired or revoked). Create a new token at %s/settings/api-tokens, then run `stackdome login --url %s --token <token>`.",

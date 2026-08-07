@@ -273,8 +273,6 @@ func TestRefreshOn403TokenReason(t *testing.T) {
 	}
 }
 
-// An API-token session (no refresh pair) must not claim the session expired —
-// the token itself was rejected, so point at where to mint a new one.
 func TestTryRefreshToken_APITokenSession(t *testing.T) {
 	c := New("https://sd.example.com", WithTokens("sd_api_token", ""))
 	err := c.TryRefreshToken(context.Background())

@@ -5,7 +5,7 @@ set -eu
 
 REPO="Stackdome/stackdome-cli"
 
-os=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin | linux
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
 arch=$(uname -m)
 case "$arch" in
   x86_64) arch="amd64" ;;
@@ -35,6 +35,7 @@ tar -xzf "${tmp}/${asset}" -C "$tmp" stackdome
 install -m 0755 "${tmp}/stackdome" "${bindir}/stackdome"
 
 echo "Installed to ${bindir}/stackdome"
+# Both sides wrapped in colons so /usr/local/bin does not match /usr/local/bind.
 case ":$PATH:" in
   *":${bindir}:"*) "${bindir}/stackdome" version ;;
   *) echo "warning: ${bindir} is not on your PATH" >&2 ;;
