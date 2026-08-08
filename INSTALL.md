@@ -54,9 +54,3 @@ $env:STACKDOME_VERSION = 'v0.0.1-alpha'
 $env:STACKDOME_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\Stackdome\bin"
 irm https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.ps1 | iex
 ```
-
-## Branded URLs
-
-A branded CLI installation URL can proxy `install.sh` and `install.ps1` from
-this repository. The self-hosted Stackdome installer remains a separate
-artifact owned by the Hub repository and should not point at these CLI scripts.
