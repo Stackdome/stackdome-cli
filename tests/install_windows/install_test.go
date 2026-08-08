@@ -194,6 +194,49 @@ func TestMalformedLatestResponseIsActionableAndRedacted(t *testing.T) {
 	}
 }
 
+func TestEnvironmentForShellDropsInheritedPSModulePathForWindowsPowerShell(t *testing.T) {
+	base := []string{
+		"KEEP=original",
+		"PsMoDuLePaTh=C:\\Program Files\\PowerShell\\7\\Modules",
+		"STACKDOME_ARCH=old",
+	}
+
+	environment := environmentForShell(base, "powershell.exe", map[string]string{
+		"STACKDOME_ARCH": "arm64",
+	})
+
+	if _, found := environmentValue(environment, "PSModulePath"); found {
+		t.Fatalf("PSModulePath remained in Windows PowerShell environment: %q", environment)
+	}
+	if value, found := environmentValue(environment, "KEEP"); !found || value != "original" {
+		t.Fatalf("KEEP = %q, %v; want original, true", value, found)
+	}
+	if value, found := environmentValue(environment, "STACKDOME_ARCH"); !found || value != "arm64" {
+		t.Fatalf("STACKDOME_ARCH = %q, %v; want arm64, true", value, found)
+	}
+}
+
+func TestEnvironmentForShellPreservesPSModulePathForPowerShell7(t *testing.T) {
+	base := []string{"PSModulePath=C:\\Program Files\\PowerShell\\7\\Modules"}
+
+	environment := environmentForShell(base, "pwsh.exe", nil)
+
+	value, found := environmentValue(environment, "PSModulePath")
+	if !found || value != `C:\Program Files\PowerShell\7\Modules` {
+		t.Fatalf("PSModulePath = %q, %v; want PowerShell 7 path, true", value, found)
+	}
+}
+
+func environmentValue(environment []string, name string) (string, bool) {
+	for _, entry := range environment {
+		entryName, value, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(entryName, name) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
 type commandResult struct {
 	output string
 	err    error
@@ -238,16 +281,20 @@ func runInstaller(t *testing.T, shell, scriptURL string, overrides map[string]st
 
 	command := fmt.Sprintf("Invoke-RestMethod -Uri '%s' | Invoke-Expression", scriptURL)
 	cmd := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command)
-	cmd.Env = environmentWithOverrides(os.Environ(), testEnvironment)
+	cmd.Env = environmentForShell(os.Environ(), shell, testEnvironment)
 	output, err := cmd.CombinedOutput()
 	return commandResult{output: string(output), err: err}
 }
 
-func environmentWithOverrides(base []string, overrides map[string]string) []string {
+func environmentForShell(base []string, shell string, overrides map[string]string) []string {
 	environment := make([]string, 0, len(base)+len(overrides))
+	dropModulePath := strings.EqualFold(filepath.Base(shell), "powershell.exe")
 	for _, entry := range base {
 		name, _, ok := strings.Cut(entry, "=")
 		if !ok {
+			continue
+		}
+		if dropModulePath && strings.EqualFold(name, "PSModulePath") {
 			continue
 		}
 		if _, overridden := lookupFold(overrides, name); !overridden {

@@ -4,5 +4,8 @@ bin/
 /stackdome
 /stackfile.yaml
 /docs/superpowers/
+/docs/agents/
+/.agents/specs/
+/.agents/plans/
 HANDOVER.md
 .vscode/
