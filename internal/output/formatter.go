@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/charmbracelet/lipgloss"
 	lgTable "github.com/charmbracelet/lipgloss/table"
-	clierrors "github.com/stackdome/cli/internal/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,6 +51,12 @@ func (f *Formatter) PrintJSON(v any) error {
 	return enc.Encode(v)
 }
 
+// PrintJSONLine writes one compact JSON value followed by a newline, suitable
+// for NDJSON streams where each event must be independently decodable.
+func (f *Formatter) PrintJSONLine(v any) error {
+	return json.NewEncoder(f.Writer).Encode(v)
+}
+
 // PrintYAML routes through JSON first so the API types' `json:` tags decide the
 // key names — yaml.Marshal alone would emit lowercased Go field names.
 func (f *Formatter) PrintYAML(v any) error {
@@ -82,6 +88,13 @@ func (f *Formatter) PrintStructured(v any) error {
 
 func (f *Formatter) IsTable() bool {
 	return f.Format == FormatTable
+}
+
+func ValidateStreamingFormat(format Format) error {
+	if format == FormatYAML {
+		return clierrors.ValidationError("YAML output is not supported for streaming commands; use -o json or table")
+	}
+	return nil
 }
 
 func (f *Formatter) NewTable(headers ...string) *Table {

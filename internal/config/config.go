@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 )
 
 const (
@@ -36,6 +36,7 @@ type Config struct {
 	fileRefreshToken string `json:"-"`
 	fileOrgID        string `json:"-"`
 	fileProjectName  string `json:"-"`
+	fileCurrentStack string `json:"-"`
 	envServerURL     string `json:"-"`
 	envAccessToken   string `json:"-"`
 	envOrgID         string `json:"-"`
@@ -50,6 +51,20 @@ func (c *Config) TokenFromEnv() bool {
 	return c.envAccessToken != "" && c.AccessToken == c.envAccessToken
 }
 
+// ContextFromEnv reports whether environment values currently control the
+// active server or credential. A persisted context switch cannot take effect
+// while either override remains active in subsequent CLI processes.
+func (c *Config) ContextFromEnv() bool {
+	return c.urlFromEnv() || c.TokenFromEnv()
+}
+
+// StackContextFromEnv reports whether an environment value currently controls
+// any part of the server/scope used to resolve a stack. A stack ID selected in
+// that ephemeral context must not be persisted into the file-backed context.
+func (c *Config) StackContextFromEnv() bool {
+	return c.ContextFromEnv() || c.orgFromEnv() || c.projectFromEnv()
+}
+
 // AdoptEnvValues drops the env latches so Save writes the current values to
 // disk verbatim. login/signup call it: an explicit login must persist a full
 // config even when the values happen to equal STACKDOME_URL / STACKDOME_TOKEN.
@@ -60,6 +75,14 @@ func (c *Config) AdoptEnvValues() {
 
 func (c *Config) urlFromEnv() bool {
 	return c.envServerURL != "" && c.ServerURL == c.envServerURL
+}
+
+func (c *Config) orgFromEnv() bool {
+	return c.envOrgID != "" && c.OrganizationID == c.envOrgID
+}
+
+func (c *Config) projectFromEnv() bool {
+	return c.envProjectName != "" && c.ProjectName == c.envProjectName
 }
 
 func DefaultPath() (string, error) {
@@ -93,6 +116,7 @@ func Load() (*Config, error) {
 func (c *Config) applyEnv() {
 	c.fileServerURL, c.fileAccessToken, c.fileRefreshToken = c.ServerURL, c.AccessToken, c.RefreshToken
 	c.fileOrgID, c.fileProjectName = c.OrganizationID, c.ProjectName
+	c.fileCurrentStack = c.CurrentStack
 
 	if v := os.Getenv("STACKDOME_URL"); v != "" {
 		c.ServerURL = v
@@ -110,6 +134,9 @@ func (c *Config) applyEnv() {
 	if v := os.Getenv("STACKDOME_PROJECT"); v != "" {
 		c.ProjectName = v
 		c.envProjectName = v
+	}
+	if c.StackContextFromEnv() {
+		c.CurrentStack = ""
 	}
 }
 
@@ -165,11 +192,14 @@ func (c *Config) Save() error {
 	if c.TokenFromEnv() {
 		out.AccessToken, out.RefreshToken = c.fileAccessToken, c.fileRefreshToken
 	}
-	if c.envOrgID != "" && c.OrganizationID == c.envOrgID {
+	if c.orgFromEnv() {
 		out.OrganizationID = c.fileOrgID
 	}
-	if c.envProjectName != "" && c.ProjectName == c.envProjectName {
+	if c.projectFromEnv() {
 		out.ProjectName = c.fileProjectName
+	}
+	if c.StackContextFromEnv() {
+		out.CurrentStack = c.fileCurrentStack
 	}
 
 	data, err := json.MarshalIndent(&out, "", "  ")
@@ -209,16 +239,19 @@ func (c *Config) RequireStack() (string, error) {
 		return "", err
 	}
 	if c.CurrentStack == "" {
-		return "", clierrors.New("No stack selected. Run `stackdome deploy` or use `--stack <name>`.")
+		if c.StackContextFromEnv() {
+			return "", clierrors.New("No stack selected. Run `stackdome stack list`, then pass `--stack <name>`; environment-controlled contexts do not persist stack selection.")
+		}
+		return "", clierrors.New("No stack selected. Run `stackdome stack list`, then `stackdome stack use <name>`; or pass `--stack <name>`.")
 	}
 	return c.CurrentStack, nil
 }
 
 func (c *Config) SetCurrentStack(name string) error {
 	c.CurrentStack = name
-	// An env-token session is stateless by design: don't create (or fail on)
-	// a config file just to remember the stack for a process that's exiting.
-	if c.TokenFromEnv() {
+	// Environment-selected servers/scopes are ephemeral: don't leak their
+	// stack IDs into the different context stored in the config file.
+	if c.StackContextFromEnv() {
 		return nil
 	}
 	return c.Save()

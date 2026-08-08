@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 type LoginResult struct {

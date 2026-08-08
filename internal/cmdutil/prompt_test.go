@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 )
 
 func TestConfirmNonTTYWithoutYesErrors(t *testing.T) {

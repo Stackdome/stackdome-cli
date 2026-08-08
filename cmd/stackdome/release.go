@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/client"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newReleaseCmd() *cobra.Command {
@@ -25,6 +25,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.AddCommand(newReleaseListCmd())
 	cmd.AddCommand(newReleaseInfoCmd())
 	cmd.AddCommand(newReleaseCancelCmd())
+	cmd.AddCommand(newReleaseRollbackCmd())
 	cmd.AddCommand(newReleaseEventsCmd())
 	return cmd
 }
@@ -130,12 +131,90 @@ func newReleaseCancelCmd() *cobra.Command {
 			if err := ctx.Client.CancelRelease(cmd.Context(), stackID, releaseID); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Release %s cancelled.\n", releaseID)
+			return printMutationResult(ctx, mutationResult{
+				Status:   "cancelled",
+				Resource: "release",
+				ID:       releaseID,
+			}, fmt.Sprintf("Release %s cancelled.", releaseID))
+		})),
+	}
+
+	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
+	return cmd
+}
+
+// rollbackResult keeps the created release available to automation and adds
+// live status only when --wait has observed its terminal state.
+type rollbackResult struct {
+	Release    any                        `json:"release" yaml:"release"`
+	LiveStatus *openapi.ReleaseLiveStatus `json:"live_status,omitempty" yaml:"live_status,omitempty"`
+}
+
+func newReleaseRollbackCmd() *cobra.Command {
+	var (
+		flagStack   string
+		flagWait    bool
+		flagTimeout time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:   "rollback <release-id>",
+		Short: "Create a release from a historical release",
+		Long:  "Create a new release from a historical release. --wait follows it for up to 10 minutes by default.",
+		Args:  cobra.ExactArgs(1),
+		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			stackID, err := resolveStackID(ctx, cmd, flagStack)
+			if err != nil {
+				return err
+			}
+			fromReleaseID, err := resolveReleaseID(ctx, cmd, stackID, args[0])
+			if err != nil {
+				return err
+			}
+
+			release, err := ctx.Client.RollbackRelease(cmd.Context(), stackID, fromReleaseID)
+			if err != nil {
+				return err
+			}
+			if !flagWait {
+				if !ctx.Formatter.IsTable() {
+					return ctx.Formatter.PrintStructured(rollbackResult{Release: release})
+				}
+				fmt.Fprintf(os.Stderr, "Rollback release #%d submitted. Track progress with:\n", release.GetSequence())
+				fmt.Fprintf(os.Stderr, "  stackdome release events %s -f\n", release.GetId())
+				return nil
+			}
+
+			waitCtx, cancel := waitContext(cmd.Context(), flagTimeout)
+			defer cancel()
+			waitCmd := *cmd
+			waitCmd.SetContext(waitCtx)
+			final, waitErr := followRelease(ctx, &waitCmd, stackID, release.GetId())
+			if err := waitCommandError(cmd.Context(), waitCtx, waitErr); err != nil {
+				return err
+			}
+			stack, live, err := fetchDeployObservation(ctx, &waitCmd, stackID, release.GetId(), final)
+			if err := waitCommandError(cmd.Context(), waitCtx, err); err != nil {
+				return err
+			}
+			if err := waitCommandError(cmd.Context(), waitCtx, nil); err != nil {
+				return err
+			}
+
+			if !ctx.Formatter.IsTable() {
+				if err := ctx.Formatter.PrintStructured(rollbackResult{Release: final, LiveStatus: live}); err != nil {
+					return err
+				}
+			} else {
+				output.RenderStackStatus(os.Stdout, stack, live, false)
+			}
 			return nil
 		})),
 	}
 
 	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
+	cmd.Flags().BoolVarP(&flagWait, "wait", "w", false, "Wait for the rollback release to finish")
+	cmd.Flags().DurationVar(&flagTimeout, "timeout", defaultWaitTimeout, "Maximum time to wait for the rollback release")
 	return cmd
 }
 
@@ -149,6 +228,12 @@ func newReleaseEventsCmd() *cobra.Command {
 		Use:   "events <release-id>",
 		Short: "Show release events",
 		Args:  cobra.ExactArgs(1),
+		PreRunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, _ *cobra.Command, _ []string) error {
+			if flagFollow && ctx.Formatter.Format == output.FormatYAML {
+				return clierrors.ValidationError("release events --follow does not support YAML output; use table or JSON")
+			}
+			return nil
+		}),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
 			if err != nil {
@@ -163,6 +248,9 @@ func newReleaseEventsCmd() *cobra.Command {
 			if flagFollow {
 				events, err := ctx.Client.StreamReleaseEvents(cmd.Context(), stackID, releaseID, 0)
 				if err != nil {
+					if cmd.Context().Err() != nil {
+						return clierrors.ErrUserCanceled
+					}
 					return err
 				}
 				var streamErr error
@@ -181,6 +269,9 @@ func newReleaseEventsCmd() *cobra.Command {
 					} else {
 						fmt.Fprintf(os.Stdout, "{\"event\":%q,\"data\":%s}\n", e.Event, eventDataJSON(e.Data))
 					}
+				}
+				if cmd.Context().Err() != nil {
+					return clierrors.ErrUserCanceled
 				}
 				return streamErr
 			}

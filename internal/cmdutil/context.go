@@ -4,9 +4,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/stackdome/cli/internal/client"
-	"github.com/stackdome/cli/internal/config"
-	"github.com/stackdome/cli/internal/output"
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/config"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 )
 
 type CommandContext struct {

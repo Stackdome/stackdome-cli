@@ -15,34 +15,111 @@ import (
 // the stack's release (live), not on the Stack/StackResource entities, so live may
 // be nil when the stack has never been released.
 func RenderStackStatus(w io.Writer, stack *openapi.Stack, live *openapi.ReleaseLiveStatus, showConditions bool) {
+	splitRelease := hasDistinctLatestAndServing(stack)
+	fmt.Fprintf(w, "Stack: %s\n", Bold(stack.Name))
+	renderReleaseStatus(w, stack)
+	if splitRelease {
+		fmt.Fprintf(w, "Serving health: %s\n\n", releaseHealth(live))
+	} else {
+		fmt.Fprintf(w, "Health: %s\n\n", releaseHealth(live))
+	}
+
 	rel := StackRelease(stack)
-
-	state := "Unknown"
-	if rel != nil && rel.State != nil {
-		state = string(*rel.State)
-	}
-
-	fmt.Fprintf(w, "Stack: %-20s State: %s\n\n", Bold(stack.Name), StateColor(state))
-
 	if rel != nil && rel.Message != nil && *rel.Message != "" {
-		fmt.Fprintf(w, "  %s\n\n", *rel.Message)
+		if splitRelease {
+			fmt.Fprintf(w, "Latest message: %s\n\n", *rel.Message)
+		} else {
+			fmt.Fprintf(w, "  %s\n\n", *rel.Message)
+		}
 	}
 
+	if splitRelease {
+		fmt.Fprintln(w, "Serving resources:")
+	}
 	renderResourceTable(w, stack.Spec.StackResources, live)
 
 	renderFailures(w, stack.Spec.StackResources, live, showConditions)
 }
 
-// StackRelease returns the release that describes what the stack is actually
-// serving: the converged one, falling back to the latest only when nothing has
-// converged yet. Must match client.GetStackLiveStatus, which picks the release
-// the resource rows come from — otherwise the header and the rows describe
-// different releases.
-func StackRelease(stack *openapi.Stack) *openapi.ReleaseSummary {
-	if stack.ConvergedRelease != nil {
-		return stack.ConvergedRelease
+func hasDistinctLatestAndServing(stack *openapi.Stack) bool {
+	return stack.LatestRelease != nil && stack.ConvergedRelease != nil &&
+		!releasesMatch(stack.LatestRelease, stack.ConvergedRelease)
+}
+
+func renderReleaseStatus(w io.Writer, stack *openapi.Stack) {
+	latest, serving := stack.LatestRelease, stack.ConvergedRelease
+	switch {
+	case releasesMatch(latest, serving):
+		fmt.Fprintf(w, "%-8s %s\n", "Release:", formatReleaseSummary(latest))
+	case latest != nil:
+		fmt.Fprintf(w, "%-8s %s\n", "Latest:", formatReleaseSummary(latest))
+		if serving != nil {
+			fmt.Fprintf(w, "%-8s %s\n", "Serving:", formatReleaseSummary(serving))
+		} else {
+			fmt.Fprintf(w, "%-8s none\n", "Serving:")
+		}
+	case serving != nil:
+		fmt.Fprintf(w, "%-8s %s\n", "Release:", formatReleaseSummary(serving))
+	default:
+		fmt.Fprintf(w, "%-8s none\n", "Release:")
 	}
-	return stack.LatestRelease
+}
+
+func releasesMatch(latest, serving *openapi.ReleaseSummary) bool {
+	if latest == nil || serving == nil {
+		return false
+	}
+	if latest == serving {
+		return true
+	}
+	return latest.Id != nil && serving.Id != nil && *latest.Id != "" && *latest.Id == *serving.Id
+}
+
+func formatReleaseSummary(release *openapi.ReleaseSummary) string {
+	if release == nil {
+		return "none"
+	}
+	parts := make([]string, 0, 4)
+	if release.Sequence != nil {
+		parts = append(parts, fmt.Sprintf("#%d", *release.Sequence))
+	}
+	state := "Unknown"
+	if release.State != nil {
+		state = string(*release.State)
+	}
+	parts = append(parts, StateColor(state))
+	if release.Id != nil && *release.Id != "" {
+		parts = append(parts, shortReleaseID(*release.Id))
+	}
+	if release.CreatedAt != nil {
+		parts = append(parts, Dim(TimeAgo(*release.CreatedAt)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shortReleaseID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
+func releaseHealth(live *openapi.ReleaseLiveStatus) string {
+	if live == nil || live.Health == nil {
+		return "Unknown"
+	}
+	return StateColor(string(*live.Health))
+}
+
+// StackRelease returns the latest release, falling back to the converged
+// release for stacks created before latest-release summaries were populated.
+// List views use it so an active or failed rollout is not hidden by the older
+// release that is still serving.
+func StackRelease(stack *openapi.Stack) *openapi.ReleaseSummary {
+	if stack.LatestRelease != nil {
+		return stack.LatestRelease
+	}
+	return stack.ConvergedRelease
 }
 
 // ResourceStatus returns the live status of a named stack resource, if any.

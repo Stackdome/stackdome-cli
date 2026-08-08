@@ -1,8 +1,8 @@
 package cmdutil
 
 import (
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/spf13/cobra"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 type contextKey struct{}
@@ -29,19 +29,19 @@ func RequireAuth(fn RunEWithContext) RunEWithContext {
 		if err := ctx.Config.RequireAuth(); err != nil {
 			return err
 		}
-		if err := resolveScope(ctx, cmd); err != nil {
+		if err := ResolveScope(ctx, cmd); err != nil {
 			return err
 		}
 		return fn(ctx, cmd, args)
 	}
 }
 
-// resolveScope fills in the org/project the client scopes its calls to. With
-// STACKDOME_TOKEN and no config file there is nothing on disk to read them
-// from, so resolve them from the API once, in memory only — unless
-// STACKDOME_ORG and STACKDOME_PROJECT already supplied both, in which case no
-// discovery call is made at all (a scoped API token may not be allowed one).
-func resolveScope(ctx *CommandContext, cmd *cobra.Command) error {
+// ResolveScope fills in a missing organization/project for an authenticated
+// context. With STACKDOME_TOKEN and no config file, it discovers them in
+// memory unless STACKDOME_ORG and STACKDOME_PROJECT supplied both. Commands
+// that must reject ephemeral contexts before discovery call this directly
+// after that validation.
+func ResolveScope(ctx *CommandContext, cmd *cobra.Command) error {
 	if ctx.Config.OrganizationID != "" && ctx.Config.ProjectName != "" {
 		return nil
 	}

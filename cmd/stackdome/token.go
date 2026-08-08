@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newTokenCmd() *cobra.Command {
@@ -126,8 +126,11 @@ func newTokenDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "API token %q deleted.\n", args[0])
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deleted",
+				Resource: "api_token",
+				ID:       args[0],
+			}, fmt.Sprintf("API token %q deleted.", args[0]))
 		})),
 	}
 

@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	"github.com/Stackdome/stackdome-cli/internal/config"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	"github.com/stackdome/cli/internal/config"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 var (
@@ -22,8 +25,8 @@ var (
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:           "stackdome",
-		Short:         "CLI for the Stackdome platform",
+		Use:   "stackdome",
+		Short: "CLI for the Stackdome platform",
 		Long: `Deploy, manage, and monitor your applications on Stackdome.
 
 Every command runs non-interactively: pass --yes to skip confirmations,
@@ -60,6 +63,7 @@ Exit codes:
 			}
 
 			ctx := cmdutil.NewCommandContext(cfg, format, level)
+			ctx.Formatter.Writer = cmd.OutOrStdout()
 			cmdutil.SetContext(cmd, ctx)
 			return nil
 		},
@@ -88,8 +92,12 @@ Exit codes:
 	rootCmd.AddCommand(newSecretCmd())
 	rootCmd.AddCommand(newVolumeCmd())
 	rootCmd.AddCommand(newAddonCmd())
+	rootCmd.AddCommand(newPostgresCmd())
 	rootCmd.AddCommand(newTokenCmd())
 	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newDoctorCmd())
+	rootCmd.AddCommand(newStackfileCmd())
+	rootCmd.AddCommand(newAPICmd())
 	rootCmd.AddCommand(newCompletionCmd())
 
 	// Usage errors exit 4, as the help text above promises. Cobra reports bad
@@ -112,23 +120,79 @@ func wrapArgErrors(cmd *cobra.Command) {
 	inner := cmd.Args
 	cmd.Args = func(c *cobra.Command, args []string) error {
 		if err := inner(c, args); err != nil {
+			// Human-readable modes can pair the validation error with actionable
+			// help. JSON stderr must remain exactly one error document.
+			if len(args) == 0 && !c.HasSubCommands() && !commandUsesJSONOutput(c) {
+				printHelpToStderr(c)
+			}
 			return clierrors.ValidationError(err.Error())
 		}
 		return nil
 	}
 }
 
+func commandUsesJSONOutput(cmd *cobra.Command) bool {
+	format, err := cmd.Flags().GetString("output")
+	return err == nil && format == string(output.FormatJSON)
+}
+
+func printHelpToStderr(cmd *cobra.Command) {
+	stdout := cmd.OutOrStdout()
+	cmd.SetOut(cmd.ErrOrStderr())
+	defer cmd.SetOut(stdout)
+	_ = cmd.Help()
+}
+
 func run() int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	return runWithContext(ctx, os.Args[1:], os.Stdout, os.Stderr)
+}
 
+func runWithWriters(args []string, stdout, stderr io.Writer) int {
+	return runWithContext(context.Background(), args, stdout, stderr)
+}
+
+func runWithContext(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	jsonErrors := requestsJSONOutput(args)
 	rootCmd := newRootCmd()
+	rootCmd.SetArgs(args)
+	rootCmd.SetOut(stdout)
+	rootCmd.SetErr(stderr)
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		msg := clierrors.UserMessage(err)
-		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
-		return clierrors.ExitCodeFrom(err)
+		exitCode := clierrors.ExitCodeFrom(err)
+		if jsonErrors {
+			_ = json.NewEncoder(stderr).Encode(struct {
+				Error    string `json:"error"`
+				ExitCode int    `json:"exit_code"`
+			}{Error: msg, ExitCode: exitCode})
+		} else {
+			fmt.Fprintf(stderr, "Error: %s\n", msg)
+		}
+		return exitCode
 	}
 	return 0
+}
+
+func requestsJSONOutput(args []string) bool {
+	jsonOutput := false
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-o" || args[i] == "--output":
+			if i+1 < len(args) {
+				jsonOutput = args[i+1] == string(output.FormatJSON)
+				i++
+			}
+		case strings.HasPrefix(args[i], "-o="):
+			jsonOutput = strings.TrimPrefix(args[i], "-o=") == string(output.FormatJSON)
+		case strings.HasPrefix(args[i], "--output="):
+			jsonOutput = strings.TrimPrefix(args[i], "--output=") == string(output.FormatJSON)
+		case len(args[i]) > len("-o") && strings.HasPrefix(args[i], "-o"):
+			jsonOutput = strings.TrimPrefix(args[i], "-o") == string(output.FormatJSON)
+		}
+	}
+	return jsonOutput
 }
 
 func parseLogLevel(s string) slog.Level {

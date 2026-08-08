@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
 )
 
 func newLogoutCmd() *cobra.Command {
@@ -15,6 +15,11 @@ func newLogoutCmd() *cobra.Command {
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if err := ctx.Config.Clear(); err != nil {
 				return err
+			}
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(struct {
+					LoggedOut bool `json:"logged_out" yaml:"logged_out"`
+				}{LoggedOut: true})
 			}
 			fmt.Fprintln(os.Stderr, "Logged out.")
 			return nil

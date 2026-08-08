@@ -4,59 +4,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/stackfile"
 	"github.com/spf13/cobra"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
-	"github.com/stackdome/cli/internal/stackfile"
 	"gopkg.in/yaml.v3"
 )
 
-const stackfileTemplate = `name: {{NAME}}
-
-resources:
-  web:
-    image: nginx:latest
-    ports:
-      - name: http
-        port: 8080
-        public: true
-        subdomain: web
-    env:
-      APP_ENV: "production"
-      PUBLIC_URL: "{{ self.public_url }}"
-      DB_HOST: "{{ db.host }}"
-      DB_URL: "postgres://{{ db.host }}:{{ db.port }}/mydb"
-      REDIS_URL: "redis://{{ redis.host }}:6379"
-    # secrets:
-    #   my-secret:
-    #     API_KEY: api_key
-    depends_on: [db, redis]
-
-  db:
-    image: postgres:16
-    ports:
-      - name: postgres
-        port: 5432
-    env:
-      POSTGRES_DB: mydb
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: changeme
-    volumes:
-      - name: db-data
-        path: /var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - name: redis
-        port: 6379
-
-volumes:
-  db-data:
-    size: 5Gi
-`
+type initResult struct {
+	Path      string   `json:"path"`
+	Source    string   `json:"source"`
+	Resources []string `json:"resources"`
+	Volumes   []string `json:"volumes"`
+	Warnings  []string `json:"warnings"`
+	Valid     bool     `json:"valid"`
+}
 
 func newInitCmd() *cobra.Command {
 	var (
@@ -71,11 +36,9 @@ func newInitCmd() *cobra.Command {
 		Long: `Scaffold a new stackfile.yaml for your project.
 
 If a docker-compose.yaml (or compose.yaml) is found in the current directory,
-it will be converted to a stackfile automatically. Use -f to specify a
-compose file explicitly.
-
-If no compose file is found, a starter template is generated.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+it will be converted to a Stackfile automatically. Use -f to specify a compose
+file explicitly. If no compose file is found, a minimal nginx Stackfile is generated.`,
+		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			name := flagName
 			if name == "" {
 				dir, err := os.Getwd()
@@ -85,7 +48,7 @@ If no compose file is found, a starter template is generated.`,
 				name = filepath.Base(dir)
 			}
 
-			outPath := "stackfile.yaml"
+			const outPath = "stackfile.yaml"
 			if !flagForce {
 				if _, err := os.Stat(outPath); err == nil {
 					return clierrors.ValidationError(fmt.Sprintf("%s already exists (use --force to overwrite)", outPath))
@@ -94,69 +57,68 @@ If no compose file is found, a starter template is generated.`,
 
 			composePath := flagFile
 			if composePath == "" {
-				dir, _ := os.Getwd()
+				dir, err := os.Getwd()
+				if err != nil {
+					return clierrors.Wrap(err, "Failed to get current directory")
+				}
 				composePath = stackfile.FindComposeFile(dir)
 			}
 
-			var content []byte
+			var (
+				sf       *stackfile.Stackfile
+				warnings []string
+				source   = "template"
+				err      error
+			)
 			if composePath != "" {
-				sf, envFiles, err := stackfile.FromCompose(composePath, name)
+				var composeWarnings stackfile.ComposeWarnings
+				sf, composeWarnings, err = stackfile.FromCompose(composePath, name)
 				if err != nil {
 					return clierrors.Wrap(err, "Failed to convert compose file")
 				}
-				out, err := yaml.Marshal(sf)
-				if err != nil {
-					return clierrors.Wrap(err, "Failed to generate stackfile")
-				}
-				content = out
-
-				if err := os.WriteFile(outPath, content, 0644); err != nil {
-					return clierrors.Wrap(err, "Failed to write stackfile")
-				}
-
-				fmt.Fprintf(os.Stderr, "%s Converted %s → %s\n\n",
-					output.Green("✓"), composePath, outPath)
-
-				resources := make([]string, 0, len(sf.Resources))
-				for name := range sf.Resources {
-					resources = append(resources, name)
-				}
-				fmt.Fprintf(os.Stderr, "  %s  %s\n", output.Bold("Resources:"), strings.Join(resources, ", "))
-				if len(sf.Volumes) > 0 {
-					volumes := make([]string, 0, len(sf.Volumes))
-					for name := range sf.Volumes {
-						volumes = append(volumes, name)
-					}
-					fmt.Fprintf(os.Stderr, "  %s   %s\n", output.Bold("Volumes:"), strings.Join(volumes, ", "))
-				}
-				fmt.Fprintln(os.Stderr)
-
-				warnings := checkConvertedStackfile(sf, envFiles)
-				if len(warnings) > 0 {
-					for _, w := range warnings {
-						fmt.Fprintf(os.Stderr, "  %s %s\n", output.Yellow("!"), w)
-					}
-					fmt.Fprintln(os.Stderr)
-				}
-
-				if err := stackfile.Validate(sf); err != nil {
-					fmt.Fprintf(os.Stderr, "  %s Validation failed: %s\n\n", output.Red("✗"), err)
-				} else {
-					fmt.Fprintf(os.Stderr, "  %s Validation passed\n\n", output.Green("✓"))
-				}
-
-				fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("Next steps:"))
-				fmt.Fprintf(os.Stderr, "  %s\n", output.Dim("  stackdome deploy -f "+outPath))
+				warnings = checkConvertedStackfile(sf, composeWarnings)
+				source = "compose"
 			} else {
-				content = []byte(strings.Replace(stackfileTemplate, "{{NAME}}", name, 1))
-				if err := os.WriteFile(outPath, content, 0644); err != nil {
-					return clierrors.Wrap(err, "Failed to write stackfile")
+				sf = &stackfile.Stackfile{
+					Name: name,
+					Resources: map[string]stackfile.Resource{
+						"web": {
+							Image: "nginx:alpine",
+							Ports: []stackfile.PortDef{{Name: "http", Port: 80, Public: true}},
+						},
+					},
 				}
-				fmt.Fprintf(os.Stderr, "Created %s\n", outPath)
 			}
 
+			content, err := yaml.Marshal(sf)
+			if err != nil {
+				return clierrors.Wrap(err, "Failed to generate Stackfile")
+			}
+			if err := os.WriteFile(outPath, content, 0o644); err != nil {
+				return clierrors.Wrap(err, "Failed to write Stackfile")
+			}
+
+			result := initResult{
+				Path:      outPath,
+				Source:    source,
+				Resources: sortedResourceNames(sf),
+				Volumes:   sortedVolumeNames(sf),
+				Warnings:  warnings,
+				Valid:     stackfile.Validate(sf) == nil,
+			}
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(result)
+			}
+
+			fmt.Fprintf(os.Stderr, "Created %s from %s.\n", outPath, source)
+			for _, warning := range warnings {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
+			}
+			if !result.Valid {
+				fmt.Fprintln(os.Stderr, "Warning: generated Stackfile needs manual changes before deployment.")
+			}
 			return nil
-		},
+		}),
 	}
 
 	cmd.Flags().StringVar(&flagName, "name", "", "App name (defaults to current directory name)")
@@ -166,18 +128,84 @@ If no compose file is found, a starter template is generated.`,
 	return cmd
 }
 
-func checkConvertedStackfile(sf *stackfile.Stackfile, envFiles map[string]string) []string {
+func sortedResourceNames(sf *stackfile.Stackfile) []string {
+	names := make([]string, 0, len(sf.Resources))
+	for name := range sf.Resources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedVolumeNames(sf *stackfile.Stackfile) []string {
+	names := make([]string, 0, len(sf.Volumes))
+	for name := range sf.Volumes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func checkConvertedStackfile(sf *stackfile.Stackfile, composeWarnings stackfile.ComposeWarnings) []string {
 	var warnings []string
-	for name, res := range sf.Resources {
+	if keys := composeWarnings.UnsupportedTopLevelKeys; len(keys) > 0 {
+		warnings = append(warnings, fmt.Sprintf("compose used unsupported top-level keys %s — review and recreate this behavior manually in stackfile.yaml", strings.Join(quotedStrings(keys), ", ")))
+	}
+	for _, name := range sortedVolumeNames(sf) {
+		if options := composeWarnings.UnsupportedVolumeOptions[name]; len(options) > 0 {
+			warnings = append(warnings, fmt.Sprintf("compose volume %q used unsupported options %s — only the volume name was preserved with a default size; recreate storage settings manually", name, strings.Join(quotedStrings(options), ", ")))
+		}
+	}
+	for _, name := range sortedResourceNames(sf) {
+		res := sf.Resources[name]
 		if res.Build != nil && res.Build.Repo == "" {
 			warnings = append(warnings, fmt.Sprintf("resource %q has a local build (no git repo) — set build.repo to a git URL", name))
 		}
 		if res.Image == "" && res.Build == nil {
 			warnings = append(warnings, fmt.Sprintf("resource %q has no image or build config", name))
 		}
-		if ref, ok := envFiles[name]; ok {
-			warnings = append(warnings, fmt.Sprintf("resource %q used env_file %q in compose — add `env_file: %s` under it to load those vars at deploy", name, ref, ref))
+		if options := composeWarnings.UnsupportedBuildOptions[name]; len(options) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported build options %s — only build.context and build.dockerfile were preserved; recreate build settings manually", name, strings.Join(quotedStrings(options), ", ")))
+		}
+		if forms := composeWarnings.UnsupportedCommandForms[name]; len(forms) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported or ambiguous Compose command forms for %s — exact argument, shell, or image-default semantics cannot be preserved; the values were omitted, so use explicit non-empty YAML string lists", name, strings.Join(quotedStrings(forms), ", ")))
+		}
+		if options := composeWarnings.UnsupportedDependsOnOptions[name]; len(options) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported depends_on options %s — dependency names were preserved; recreate ordering and health requirements manually", name, strings.Join(quotedStrings(options), ", ")))
+		}
+		if entries := composeWarnings.UnsupportedVolumeMountOptions[name]; len(entries) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported volume mount entries or options %s — only supported named-volume source and target pairs were preserved; recreate mount behavior manually", name, strings.Join(quotedStrings(entries), ", ")))
+		}
+		if mappings := composeWarnings.UnsupportedPortMappings[name]; len(mappings) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used port mappings %s whose host IP or published port cannot be represented exactly — container ports were preserved; constrained host-IP bindings remain private, and published host ports require Stackdome routing", name, strings.Join(quotedStrings(mappings), ", ")))
+		}
+		if entries := composeWarnings.UnsupportedPorts[name]; len(entries) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported port entries %s — these ports were omitted; replace ranges, invalid syntax, or unsupported protocols with explicit TCP single-port mappings", name, strings.Join(quotedStrings(entries), ", ")))
+		}
+		if refs := composeWarnings.EnvFiles[name]; len(refs) > 0 {
+			quotedRefs := make([]string, len(refs))
+			for i, ref := range refs {
+				quotedRefs[i] = fmt.Sprintf("%q", ref)
+			}
+			warnings = append(warnings, fmt.Sprintf("resource %q used env_file entries %s in compose — copy required non-sensitive values into env; Stackfiles reject env_file", name, strings.Join(quotedRefs, ", ")))
+		}
+		if binds := composeWarnings.UnsupportedBindMounts[name]; len(binds) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported bind mount sources %s in compose — use a named volume instead", name, strings.Join(binds, ", ")))
+		}
+		if keys := composeWarnings.UnsupportedServiceKeys[name]; len(keys) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q used unsupported compose keys %s — review and recreate this behavior manually in stackfile.yaml", name, strings.Join(quotedStrings(keys), ", ")))
+		}
+		if variables := composeWarnings.UnresolvedEnvironment[name]; len(variables) > 0 {
+			warnings = append(warnings, fmt.Sprintf("resource %q has unresolved environment variables %s — set explicit non-sensitive values in env or connect a Stackdome secret; no values were imported", name, strings.Join(quotedStrings(variables), ", ")))
 		}
 	}
 	return warnings
+}
+
+func quotedStrings(values []string) []string {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = fmt.Sprintf("%q", value)
+	}
+	return quoted
 }

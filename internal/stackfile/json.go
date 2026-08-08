@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"os"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 func LoadJSON(path string) (*openapi.Stack, error) {

@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
 )
 
 func newRestartCmd() *cobra.Command {
@@ -28,8 +27,11 @@ func newRestartCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Restart initiated for resource %q\n", resourceName)
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "restart_initiated",
+				Resource: "stack_resource",
+				Name:     resourceName,
+			}, fmt.Sprintf("Restart initiated for resource %q", resourceName))
 		})),
 	}
 

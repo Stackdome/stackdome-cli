@@ -7,10 +7,10 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newOpenCmd() *cobra.Command {
@@ -23,7 +23,7 @@ func newOpenCmd() *cobra.Command {
 
 With -o json|yaml no browser is launched: the public URLs are printed to stdout
 as {"target": ..., "urls": [...]}.`,
-		Args:  cobra.MaximumNArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
 			if err != nil {

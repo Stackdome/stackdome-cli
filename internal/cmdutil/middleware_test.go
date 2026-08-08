@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Stackdome/stackdome-cli/internal/config"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/config"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 // With org and project supplied (e.g. via STACKDOME_ORG / STACKDOME_PROJECT)
@@ -24,8 +24,8 @@ func TestResolveScopeSkipsDiscoveryWhenScopeKnown(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := &CommandContext{Config: cfg}
-	if err := resolveScope(ctx, &cobra.Command{}); err != nil {
-		t.Fatalf("resolveScope: %v", err)
+	if err := ResolveScope(ctx, &cobra.Command{}); err != nil {
+		t.Fatalf("ResolveScope: %v", err)
 	}
 }
 

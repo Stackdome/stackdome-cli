@@ -1,16 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/client"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newBuildCmd() *cobra.Command {
@@ -38,6 +39,9 @@ func newBuildLogsCmd() *cobra.Command {
 		Short: "Stream logs for a build",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			if err := output.ValidateStreamingFormat(ctx.Formatter.Format); err != nil {
+				return err
+			}
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
 			if err != nil {
 				return err
@@ -54,21 +58,26 @@ func newBuildLogsCmd() *cobra.Command {
 				Since:  flagSince,
 			})
 			if err != nil {
+				if cmd.Context().Err() == context.Canceled {
+					return clierrors.ErrUserCanceled
+				}
 				return err
 			}
 			defer stream.Close()
 
-			return client.ParseSSEStream(stream, func(e client.SSEEvent) error {
+			err = client.ParseSSEStream(stream, func(e client.SSEEvent) error {
 				if e.Event == "error" {
-					fmt.Fprintf(os.Stderr, "Error: %s\n", e.Data)
 					return clierrors.New(e.Data)
 				}
 				if e.IsEnd() {
 					return nil
 				}
-				fmt.Println(e.Data)
-				return nil
+				return printLogEvent(ctx.Formatter, e)
 			})
+			if cmd.Context().Err() == context.Canceled {
+				return clierrors.ErrUserCanceled
+			}
+			return err
 		})),
 	}
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 )
 
 // refreshServer serves /api/v1/config, rejecting anything but wantToken with a
@@ -135,6 +135,106 @@ func TestNoRefreshTokenSurfaces401(t *testing.T) {
 	wrapped := WrapError(httpResp, err, "get config")
 	if !errors.As(wrapped, &cliErr) || cliErr.ExitCode != clierrors.ExitAuth {
 		t.Fatalf("WrapError = %#v, want CLIError with exit code %d", wrapped, clierrors.ExitAuth)
+	}
+}
+
+// An unrefreshable credential cannot recover from a genuine access-token
+// rejection. The client-facing API call must tell the user where to create a
+// replacement token without exposing the rejected credential.
+func TestUnrefreshableTokenRejectionDirectsToTokenSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		accessToken  string
+		refreshToken string
+		status       int
+		body         string
+	}{
+		{
+			name:         "sdm token rejected with 401",
+			accessToken:  "sdm_rejected_token",
+			refreshToken: "refresh-old",
+			status:       http.StatusUnauthorized,
+			body:         `{"reason":"token expired"}`,
+		},
+		{
+			name:        "token without refresh pair rejected with token expired 403",
+			accessToken: "opaque-rejected-token",
+			status:      http.StatusForbidden,
+			body:        `{"reason":"token expired"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &refreshServer{
+				t:            t,
+				wantToken:    "accepted-token",
+				rejectStatus: tc.status,
+				rejectBody:   tc.body,
+			}
+			ts := httptest.NewServer(srv.handler())
+			defer ts.Close()
+
+			c := New(ts.URL, WithTokens(tc.accessToken, tc.refreshToken))
+			_, err := c.GetCurrentUser(context.Background())
+			if err == nil {
+				t.Fatal("expected auth error")
+			}
+			if srv.authHits != 0 {
+				t.Errorf("refresh endpoint hit %d times, want 0", srv.authHits)
+			}
+
+			var cliErr *clierrors.CLIError
+			if !errors.As(err, &cliErr) || cliErr.ExitCode != clierrors.ExitAuth {
+				t.Fatalf("error = %#v, want CLI auth error", err)
+			}
+			wantURL := ts.URL + "/settings/api-tokens"
+			if !strings.Contains(cliErr.Message, wantURL) {
+				t.Errorf("message = %q, want replacement-token URL %q", cliErr.Message, wantURL)
+			}
+			if !strings.Contains(cliErr.Message, "stackdome login --token") {
+				t.Errorf("message = %q, want replacement-token login guidance", cliErr.Message)
+			}
+			if strings.Contains(err.Error(), tc.accessToken) {
+				t.Errorf("error leaked rejected token: %q", err)
+			}
+		})
+	}
+}
+
+// A 403 that does not match the access-token rejection contract is a real
+// permission denial. Its server reason must remain visible without describing
+// the token as expired.
+func TestPermissionDenied403RetainsReasonWithoutExpiryGuidance(t *testing.T) {
+	const denied = `{"code":403,"id":"forbidden","kind":"auth","reason":"insufficient permissions"}`
+	srv := &refreshServer{
+		t:            t,
+		wantToken:    "accepted-token",
+		rejectStatus: http.StatusForbidden,
+		rejectBody:   denied,
+	}
+	ts := httptest.NewServer(srv.handler())
+	defer ts.Close()
+
+	c := New(ts.URL, WithTokens("sdm_permission_denied", ""))
+	_, err := c.GetCurrentUser(context.Background())
+	if err == nil {
+		t.Fatal("expected permission error")
+	}
+	if srv.authHits != 0 {
+		t.Errorf("refresh endpoint hit %d times, want 0", srv.authHits)
+	}
+
+	var cliErr *clierrors.CLIError
+	if !errors.As(err, &cliErr) {
+		t.Fatalf("error = %#v, want CLI error", err)
+	}
+	if cliErr.Message != "Permission denied." {
+		t.Errorf("message = %q, want permission denial", cliErr.Message)
+	}
+	if cliErr.Detail != "insufficient permissions" {
+		t.Errorf("detail = %q, want original server reason", cliErr.Detail)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "expired") {
+		t.Errorf("error = %q, must not describe a permission denial as expired", err)
 	}
 }
 
