@@ -1,9 +1,9 @@
-module github.com/stackdome/cli
+module github.com/Stackdome/stackdome-cli
 
 go 1.25.0
 
 require (
-	github.com/Stackdome/stackdome v0.0.1-alpha.0.20260805180415-8ce931c66403
+	github.com/Stackdome/stackdome v0.0.1-alpha.0.20260807222415-fff668b59ddc
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2

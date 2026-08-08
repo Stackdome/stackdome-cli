@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 // reconnectBackoff is the pause before retrying a *failed* reconnect. A clean
@@ -38,6 +38,19 @@ func (c *Client) CreateRelease(ctx context.Context, stackID string) (*openapi.St
 		CreateReleaseRequest(openapi.CreateReleaseRequest{}).Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to create release")
+	}
+	return resp, nil
+}
+
+// RollbackRelease creates a new release using the document recorded by a
+// previous release. The API intentionally models rollback as release creation
+// with from_release_id rather than a separate endpoint.
+func (c *Client) RollbackRelease(ctx context.Context, stackID, fromReleaseID string) (*openapi.StackRelease, error) {
+	resp, httpResp, err := c.apiClient.ReleasesApi.
+		CreateRelease(ctx, c.orgID, c.projectName, stackID).
+		CreateReleaseRequest(openapi.CreateReleaseRequest{FromReleaseId: openapi.PtrString(fromReleaseID)}).Execute()
+	if err != nil {
+		return nil, WrapError(httpResp, err, "Failed to roll back release")
 	}
 	return resp, nil
 }
@@ -170,18 +183,16 @@ func (c *Client) openReleaseEventStream(ctx context.Context, stackID, releaseID 
 
 	// A release can be quiet for minutes; reuse the configured transport (so
 	// token refresh still applies) but not its 30s whole-request timeout.
-	httpClient := &http.Client{}
-	if c.cfg.HTTPClient != nil {
-		httpClient.Transport = c.cfg.HTTPClient.Transport
-	}
+	httpClient := c.streamHTTPClient()
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, clierrors.Wrap(err, "Failed to connect to release event stream")
 	}
 	if resp.StatusCode != http.StatusOK {
+		streamErr := wrapHTTPResponseError(resp, "Release event streaming failed")
 		resp.Body.Close()
-		return nil, clierrors.FromHTTP(resp.StatusCode, "Release event streaming failed")
+		return nil, streamErr
 	}
 	return resp.Body, nil
 }

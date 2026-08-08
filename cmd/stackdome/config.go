@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 func newConfigCmd() *cobra.Command {
@@ -54,22 +54,17 @@ func newConfigSetStackCmd() *cobra.Command {
 		Use:   "set-stack <stack>",
 		Short: "Set the current stack context (name or ID)",
 		Args:  cobra.ExactArgs(1),
-		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			id, err := resolveStackRef(ctx, cmd, args[0])
-			if err != nil {
-				return err
-			}
-			if err := ctx.Config.SetCurrentStack(id); err != nil {
-				return err
-			}
-			note := ""
-			if ctx.Config.TokenFromEnv() {
-				note = " — this session only, not persisted with env-token auth"
-			}
-			fmt.Fprintf(os.Stderr, "Current stack set to %s (%s)%s\n", args[0], id, note)
-			return nil
-		})),
+		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			return selectStackContext(ctx, cmd, args[0], "config set-stack")
+		}),
 	}
+}
+
+type contextSwitchResult struct {
+	Status        string `json:"status" yaml:"status"`
+	Resource      string `json:"resource" yaml:"resource"`
+	ServerURL     string `json:"server_url" yaml:"server_url"`
+	Authenticated bool   `json:"authenticated" yaml:"authenticated"`
 }
 
 func newConfigSetContextCmd() *cobra.Command {
@@ -78,6 +73,9 @@ func newConfigSetContextCmd() *cobra.Command {
 		Short: "Switch to a different Stackdome server",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			if ctx.Config.ContextFromEnv() {
+				return clierrors.ValidationError("config set-context cannot override STACKDOME_URL or STACKDOME_TOKEN; unset them or change those environment variables")
+			}
 			newURL := args[0]
 			if newURL == "" {
 				return clierrors.ValidationError("URL cannot be empty")
@@ -95,6 +93,14 @@ func newConfigSetContextCmd() *cobra.Command {
 				return err
 			}
 
+			if !ctx.Formatter.IsTable() {
+				return ctx.Formatter.PrintStructured(contextSwitchResult{
+					Status:        "switched",
+					Resource:      "context",
+					ServerURL:     newURL,
+					Authenticated: false,
+				})
+			}
 			fmt.Fprintf(os.Stderr, "Context switched to %s. Run `stackdome login` to authenticate.\n", newURL)
 			return nil
 		}),

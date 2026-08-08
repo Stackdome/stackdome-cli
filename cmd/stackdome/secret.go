@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newSecretCmd() *cobra.Command {
@@ -236,8 +236,12 @@ func newSecretDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Secret %q deleted.\n", args[0])
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deleted",
+				Resource: "secret",
+				Name:     args[0],
+				ID:       secret.GetId(),
+			}, fmt.Sprintf("Secret %q deleted.", args[0]))
 		})),
 	}
 

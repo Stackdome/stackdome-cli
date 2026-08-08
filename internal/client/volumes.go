@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 // ListVolumes lists the volumes of a stack.
@@ -49,7 +49,7 @@ func (c *Client) ListVolumes(ctx context.Context, stackID string) ([]openapi.Vol
 	return list.GetItems(), nil
 }
 
-func (c *Client) CreateVolume(ctx context.Context, name, size, accessMode string) (*openapi.Volume, error) {
+func (c *Client) CreateVolume(ctx context.Context, stackID, name, size, accessMode string) (*openapi.Volume, error) {
 	volume := openapi.Volume{
 		Name: name,
 		Spec: openapi.VolumeSpec{
@@ -58,7 +58,7 @@ func (c *Client) CreateVolume(ctx context.Context, name, size, accessMode string
 		},
 	}
 	resp, httpResp, err := c.apiClient.DefaultApi.
-		ApiV1OrganizationsOrgIdProjectsProjectNameVolumesPost(ctx, c.orgID, c.projectName).
+		ApiV1OrganizationsOrgIdProjectsProjectNameStacksIdVolumesPost(ctx, c.orgID, c.projectName, stackID).
 		Volume(volume).Execute()
 	if err != nil {
 		return nil, WrapError(httpResp, err, "Failed to create volume")

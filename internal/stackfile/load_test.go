@@ -3,11 +3,12 @@ package stackfile_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/Stackdome/stackdome-cli/internal/stackfile"
 	"github.com/Stackdome/stackdome/pkg/models"
-	"github.com/stackdome/cli/internal/stackfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,26 +83,65 @@ func TestSelfPublicURLOldSpellingRejected(t *testing.T) {
 	}
 }
 
-func TestLoadMergesEnvFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "web.env"), []byte("FROM_FILE=yes\nPUBLIC_URL=ignored\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "stackfile.yaml")
-	if err := os.WriteFile(path, []byte(singlePortSelfRef+"    env_file: web.env\n"), 0o644); err != nil {
-		t.Fatal(err)
+func TestLoadRejectsUnknownKeysIncludingCLIOnlyEnvFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "top-level typo",
+			content: singlePortSelfRef + "nmae: typo\n",
+		},
+		{
+			name:    "cli-only env_file",
+			content: singlePortSelfRef + "    env_file: web.env\n",
+		},
 	}
 
-	sf, err := stackfile.Load(path)
-	if err != nil {
-		t.Fatalf("load: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := stackfile.Load(write(t, "stackfile.yaml", tt.content))
+			if err == nil {
+				t.Fatal("expected unknown key to be rejected")
+			}
+		})
 	}
-	env := sf.Resources["web"].Env
-	if env["FROM_FILE"] != "yes" {
-		t.Fatalf("env_file value not merged: %v", env)
+}
+
+func TestLoadAllowsCommitWithBranchOrTagButNotBoth(t *testing.T) {
+	tests := []struct {
+		name    string
+		build   string
+		wantErr bool
+	}{
+		{
+			name:  "branch and commit",
+			build: "      repo: https://github.com/example/app.git\n      branch: main\n      commit: deadbeef\n",
+		},
+		{
+			name:  "tag and commit",
+			build: "      repo: https://github.com/example/app.git\n      tag: v1.0.0\n      commit: deadbeef\n",
+		},
+		{
+			name:    "branch and tag",
+			build:   "      repo: https://github.com/example/app.git\n      branch: main\n      tag: v1.0.0\n",
+			wantErr: true,
+		},
+		{
+			name:    "commit without ref",
+			build:   "      repo: https://github.com/example/app.git\n      commit: deadbeef\n",
+			wantErr: true,
+		},
 	}
-	if env["PUBLIC_URL"] != "{{ self.public_url }}" {
-		t.Fatalf("env_file must not override env: %v", env)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := "name: demo\nresources:\n  app:\n    build:\n" + tt.build
+			_, err := stackfile.Load(write(t, "stackfile.yaml", content))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Load() error = %v, want error %t", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -124,12 +164,12 @@ volumes:
   db-data:
 `)
 
-	sf, envFiles, err := stackfile.FromCompose(compose, "demo")
+	sf, warnings, err := stackfile.FromCompose(compose, "demo")
 	if err != nil {
 		t.Fatalf("from compose: %v", err)
 	}
-	if len(envFiles) != 0 {
-		t.Fatalf("unexpected env files: %v", envFiles)
+	if len(warnings.EnvFiles) != 0 || len(warnings.UnsupportedBindMounts) != 0 {
+		t.Fatalf("unexpected compose warnings: %+v", warnings)
 	}
 
 	out, err := yaml.Marshal(sf)
@@ -138,5 +178,67 @@ volumes:
 	}
 	if _, err := stackfile.Load(write(t, "stackfile.yaml", string(out))); err != nil {
 		t.Fatalf("generated stackfile does not validate: %v\n%s", err, out)
+	}
+}
+
+func TestFromComposeCollectsEveryEnvFileSyntax(t *testing.T) {
+	compose := write(t, "compose.yaml", `services:
+  string:
+    image: nginx:alpine
+    env_file: .env.string
+  list:
+    image: nginx:alpine
+    env_file:
+      - .env.base
+      - .env.override
+  mapping:
+    image: nginx:alpine
+    env_file:
+      path: .env.mapping
+      required: false
+  long-list:
+    image: nginx:alpine
+    env_file:
+      - path: .env.first
+        required: true
+      - path: .env.second
+        format: raw
+`)
+
+	_, warnings, err := stackfile.FromCompose(compose, "demo")
+	if err != nil {
+		t.Fatalf("from compose: %v", err)
+	}
+	want := map[string][]string{
+		"string":    {".env.string"},
+		"list":      {".env.base", ".env.override"},
+		"mapping":   {".env.mapping"},
+		"long-list": {".env.first", ".env.second"},
+	}
+	if !reflect.DeepEqual(warnings.EnvFiles, want) {
+		t.Fatalf("env files = %#v, want %#v", warnings.EnvFiles, want)
+	}
+}
+
+func TestFromComposeDoesNotCreateNamedVolumeFromWindowsBindMount(t *testing.T) {
+	compose := write(t, "compose.yaml", `services:
+  web:
+    image: nginx:alpine
+    volumes:
+      - 'C:\data:/data'
+`)
+
+	sf, warnings, err := stackfile.FromCompose(compose, "demo")
+	if err != nil {
+		t.Fatalf("from compose: %v", err)
+	}
+	if _, exists := sf.Volumes["C"]; exists {
+		t.Fatalf("Windows bind mount became bogus named volume C: %+v", sf.Volumes)
+	}
+	if mounts := sf.Resources["web"].Volumes; len(mounts) != 0 {
+		t.Fatalf("Windows bind mount became bogus resource mount: %+v", mounts)
+	}
+	if got := warnings.UnsupportedBindMounts["web"]; !reflect.DeepEqual(got, []string{`C:\data`}) {
+		t.Fatalf("unsupported bind mount warning = %v, want C:\\data", got)
 	}
 }

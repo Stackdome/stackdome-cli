@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRollbackReleasePostsSourceReleaseID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/v1/organizations/org-1/projects/proj-1/stacks/stack-1/releases" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+
+		var request struct {
+			FromReleaseID string `json:"from_release_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.FromReleaseID != "release-previous" {
+			t.Errorf("from_release_id = %q, want %q", request.FromReleaseID, "release-previous")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"release-rollback","stack_id":"stack-1","sequence":8,"state":"Pending"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, WithTokens("access", ""), WithOrgAndProject("org-1", "proj-1"))
+	release, err := c.RollbackRelease(context.Background(), "stack-1", "release-previous")
+	if err != nil {
+		t.Fatalf("RollbackRelease: %v", err)
+	}
+	if release.GetId() != "release-rollback" {
+		t.Errorf("new release ID = %q, want %q", release.GetId(), "release-rollback")
+	}
+}
 
 // TestStreamReleaseEventsResumesAfterDrop: the server hands out events 1-3 then
 // drops the connection mid-release. The client must reconnect from where it

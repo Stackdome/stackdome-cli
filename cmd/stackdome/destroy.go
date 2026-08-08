@@ -2,10 +2,9 @@ package main
 
 import (
 	"fmt"
-	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
 )
 
 func newDestroyCmd() *cobra.Command {
@@ -41,8 +40,12 @@ func newDestroyCmd() *cobra.Command {
 				_ = ctx.Config.SetCurrentStack("")
 			}
 
-			fmt.Fprintf(os.Stderr, "Stack %q deletion initiated.\n", stack.Name)
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deletion_initiated",
+				Resource: "stack",
+				Name:     stack.Name,
+				ID:       stackID,
+			}, fmt.Sprintf("Stack %q deletion initiated.", stack.Name))
 		})),
 	}
 

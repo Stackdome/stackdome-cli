@@ -2,6 +2,7 @@ package stackfile
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,18 +15,48 @@ import (
 type composeFile struct {
 	Services map[string]composeService `yaml:"services"`
 	Volumes  map[string]any            `yaml:"volumes"`
+	Version  any                       `yaml:"version"`
+	Name     string                    `yaml:"name"`
+	Extra    map[string]any            `yaml:",inline"`
 }
 
 type composeService struct {
-	Image       string            `yaml:"image"`
-	Build       any               `yaml:"build"`
-	Command     any               `yaml:"command"`
-	Entrypoint  any               `yaml:"entrypoint"`
-	Ports       []string          `yaml:"ports"`
-	Environment any               `yaml:"environment"`
-	EnvFile     any               `yaml:"env_file"`
-	Volumes     []string          `yaml:"volumes"`
-	DependsOn   any               `yaml:"depends_on"`
+	Image       string         `yaml:"image"`
+	Build       any            `yaml:"build"`
+	Command     any            `yaml:"command"`
+	Entrypoint  any            `yaml:"entrypoint"`
+	Ports       []string       `yaml:"ports"`
+	Environment any            `yaml:"environment"`
+	EnvFile     any            `yaml:"env_file"`
+	Volumes     []string       `yaml:"volumes"`
+	DependsOn   any            `yaml:"depends_on"`
+	Extra       map[string]any `yaml:",inline"`
+}
+
+type ComposeWarnings struct {
+	EnvFiles                      map[string][]string
+	UnsupportedBindMounts         map[string][]string
+	UnsupportedTopLevelKeys       []string
+	UnsupportedServiceKeys        map[string][]string
+	UnresolvedEnvironment         map[string][]string
+	UnsupportedBuildOptions       map[string][]string
+	UnsupportedDependsOnOptions   map[string][]string
+	UnsupportedVolumeOptions      map[string][]string
+	UnsupportedVolumeMountOptions map[string][]string
+	UnsupportedPorts              map[string][]string
+	UnsupportedPortMappings       map[string][]string
+	UnsupportedCommandForms       map[string][]string
+}
+
+type composeServiceWarnings struct {
+	unsupportedBindMounts         []string
+	unresolvedEnvironment         []string
+	unsupportedBuildOptions       []string
+	unsupportedDependsOnOptions   []string
+	unsupportedVolumeMountOptions []string
+	unsupportedPorts              []string
+	unsupportedPortMappings       []string
+	unsupportedCommandForms       []string
 }
 
 func FindComposeFile(dir string) string {
@@ -45,22 +76,21 @@ func FindComposeFile(dir string) string {
 }
 
 // FromCompose converts a docker-compose file into a stackfile. The second
-// return value maps resource name -> the compose `env_file` it referenced:
-// yaml.Marshal of a Stackfile cannot emit that key, so the caller reports them
-// instead of dropping them silently.
-func FromCompose(path, appName string) (*Stackfile, map[string]string, error) {
+// return value records Compose features that Stackfiles cannot express, so the
+// caller can warn rather than dropping them silently.
+func FromCompose(path, appName string) (*Stackfile, ComposeWarnings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, ComposeWarnings{}, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	var compose composeFile
 	if err := yaml.Unmarshal(data, &compose); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse %s: %w", path, err)
+		return nil, ComposeWarnings{}, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 
 	if len(compose.Services) == 0 {
-		return nil, nil, fmt.Errorf("no services found in %s", path)
+		return nil, ComposeWarnings{}, fmt.Errorf("no services found in %s", path)
 	}
 
 	sf := &Stackfile{
@@ -68,236 +98,325 @@ func FromCompose(path, appName string) (*Stackfile, map[string]string, error) {
 		Resources: make(map[string]Resource),
 		Volumes:   make(map[string]VolumeDef),
 	}
-	envFiles := make(map[string]string)
+	warnings := ComposeWarnings{
+		EnvFiles:                      make(map[string][]string),
+		UnsupportedBindMounts:         make(map[string][]string),
+		UnsupportedTopLevelKeys:       unsupportedComposeKeys(compose.Extra),
+		UnsupportedServiceKeys:        make(map[string][]string),
+		UnresolvedEnvironment:         make(map[string][]string),
+		UnsupportedBuildOptions:       make(map[string][]string),
+		UnsupportedDependsOnOptions:   make(map[string][]string),
+		UnsupportedVolumeOptions:      make(map[string][]string),
+		UnsupportedVolumeMountOptions: make(map[string][]string),
+		UnsupportedPorts:              make(map[string][]string),
+		UnsupportedPortMappings:       make(map[string][]string),
+		UnsupportedCommandForms:       make(map[string][]string),
+	}
 
 	for name, svc := range compose.Services {
-		sf.Resources[name] = convertService(svc)
-		if ref := parseEnvFileRef(svc.EnvFile); ref != "" {
-			envFiles[name] = ref
+		res, serviceWarnings := convertService(svc)
+		sf.Resources[name] = res
+		if keys := unsupportedComposeKeys(svc.Extra); len(keys) > 0 {
+			warnings.UnsupportedServiceKeys[name] = keys
+		}
+		if len(serviceWarnings.unresolvedEnvironment) > 0 {
+			warnings.UnresolvedEnvironment[name] = serviceWarnings.unresolvedEnvironment
+		}
+		if refs := parseEnvFileRefs(svc.EnvFile); len(refs) > 0 {
+			warnings.EnvFiles[name] = refs
+		}
+		if len(serviceWarnings.unsupportedBindMounts) > 0 {
+			warnings.UnsupportedBindMounts[name] = serviceWarnings.unsupportedBindMounts
+		}
+		if len(serviceWarnings.unsupportedBuildOptions) > 0 {
+			warnings.UnsupportedBuildOptions[name] = serviceWarnings.unsupportedBuildOptions
+		}
+		if len(serviceWarnings.unsupportedDependsOnOptions) > 0 {
+			warnings.UnsupportedDependsOnOptions[name] = serviceWarnings.unsupportedDependsOnOptions
+		}
+		if len(serviceWarnings.unsupportedVolumeMountOptions) > 0 {
+			warnings.UnsupportedVolumeMountOptions[name] = serviceWarnings.unsupportedVolumeMountOptions
+		}
+		if len(serviceWarnings.unsupportedPorts) > 0 {
+			warnings.UnsupportedPorts[name] = serviceWarnings.unsupportedPorts
+		}
+		if len(serviceWarnings.unsupportedPortMappings) > 0 {
+			warnings.UnsupportedPortMappings[name] = serviceWarnings.unsupportedPortMappings
+		}
+		if len(serviceWarnings.unsupportedCommandForms) > 0 {
+			warnings.UnsupportedCommandForms[name] = serviceWarnings.unsupportedCommandForms
 		}
 	}
 
-	for volName := range compose.Volumes {
+	for volName, definition := range compose.Volumes {
 		sf.Volumes[volName] = VolumeDef{Size: "1Gi"}
+		if options := unsupportedVolumeDefinitionOptions(definition); len(options) > 0 {
+			warnings.UnsupportedVolumeOptions[volName] = options
+		}
 	}
 
 	collectNamedVolumes(sf)
 
-	return sf, envFiles, nil
+	return sf, warnings, nil
 }
 
-func convertService(svc composeService) Resource {
+func convertService(svc composeService) (Resource, composeServiceWarnings) {
 	var res Resource
+	var warnings composeServiceWarnings
 
 	res.Image = svc.Image
-	res.Build = parseBuild(svc.Build)
-	res.Command, res.Args = parseCommandArgs(svc.Entrypoint, svc.Command)
-	res.Ports = parsePorts(svc.Ports)
-	res.Env = parseEnvironment(svc.Environment)
-	res.Volumes = parseVolumeMounts(svc.Volumes)
-	res.DependsOn = parseDependsOn(svc.DependsOn)
+	res.Build, warnings.unsupportedBuildOptions = parseBuild(svc.Build)
+	res.Command, res.Args, warnings.unsupportedCommandForms = parseCommandArgs(svc.Entrypoint, svc.Command)
+	res.Ports, warnings.unsupportedPorts, warnings.unsupportedPortMappings = parsePorts(svc.Ports)
+	res.Env, warnings.unresolvedEnvironment = parseEnvironment(svc.Environment)
+	res.Volumes, warnings.unsupportedBindMounts, warnings.unsupportedVolumeMountOptions = parseVolumeMounts(svc.Volumes)
+	res.DependsOn, warnings.unsupportedDependsOnOptions = parseDependsOn(svc.DependsOn)
 
-	return res
+	return res, warnings
 }
 
-func parseCommandArgs(entrypoint, command any) (cmd []string, args []string) {
-	ep := parseStringOrList(entrypoint)
-	c := parseStringOrList(command)
-
-	if len(ep) > 0 {
-		// Both set: entrypoint → command, command → args
-		cmd = ep
-		args = c
-	} else {
-		// Only command set: maps to command (overrides the container's default)
-		cmd = c
+func unsupportedComposeKeys(extra map[string]any) []string {
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		// Compose extension fields are inert definitions; any values merged from
+		// them have already materialized under ordinary service keys.
+		if strings.HasPrefix(key, "x-") {
+			continue
+		}
+		keys = append(keys, key)
 	}
-	return
+	sort.Strings(keys)
+	return keys
 }
 
-func parseStringOrList(raw any) []string {
-	if raw == nil {
-		return nil
-	}
-	switch v := raw.(type) {
-	case string:
-		fields := strings.Fields(v)
-		if len(fields) == 0 {
+func unsupportedVolumeDefinitionOptions(raw any) []string {
+	definition, ok := raw.(map[string]any)
+	if !ok {
+		if raw == nil {
 			return nil
 		}
-		return fields
+		return []string{"<definition>"}
+	}
+	return unsupportedComposeKeys(definition)
+}
+
+func parseCommandArgs(entrypoint, command any) (cmd []string, args []string, unsupported []string) {
+	var ambiguous bool
+	cmd, ambiguous = parseStringList(entrypoint)
+	if ambiguous {
+		unsupported = append(unsupported, "entrypoint")
+	}
+	args, ambiguous = parseStringList(command)
+	if ambiguous {
+		unsupported = append(unsupported, "command")
+	}
+	sort.Strings(unsupported)
+	return cmd, args, unsupported
+}
+
+func parseStringList(raw any) ([]string, bool) {
+	if raw == nil {
+		return nil, false
+	}
+	switch v := raw.(type) {
+	case string:
+		// Compose string forms have quoting and shell semantics that a
+		// Stackfile argv cannot preserve safely. Require an explicit list.
+		return nil, true
 	case []any:
-		var out []string
+		if len(v) == 0 {
+			return nil, true
+		}
+		out := make([]string, 0, len(v))
 		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
+			s, ok := item.(string)
+			if !ok {
+				return nil, true
+			}
+			out = append(out, s)
+		}
+		return out, false
+	}
+	return nil, true
+}
+
+func parseEnvFileRefs(raw any) []string {
+	switch v := raw.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []any:
+		refs := make([]string, 0, len(v))
+		for _, item := range v {
+			switch entry := item.(type) {
+			case string:
+				if entry != "" {
+					refs = append(refs, entry)
+				}
+			case map[string]any:
+				if path, ok := entry["path"].(string); ok && path != "" {
+					refs = append(refs, path)
+				}
 			}
 		}
-		return out
+		return refs
+	case map[string]any:
+		if path, ok := v["path"].(string); ok && path != "" {
+			return []string{path}
+		}
 	}
 	return nil
 }
 
-func parseEnvFileRef(raw any) string {
+func parseBuild(raw any) (*BuildConfig, []string) {
 	if raw == nil {
-		return ""
-	}
-	switch v := raw.(type) {
-	case string:
-		return v
-	case []any:
-		if len(v) > 0 {
-			if s, ok := v[0].(string); ok {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func parseBuild(raw any) *BuildConfig {
-	if raw == nil {
-		return nil
+		return nil, nil
 	}
 
 	switch v := raw.(type) {
 	case string:
-		return &BuildConfig{Context: v}
+		return &BuildConfig{Context: v}, nil
 	case map[string]any:
 		bc := &BuildConfig{}
-		if ctx, ok := v["context"].(string); ok {
-			bc.Context = ctx
+		var unsupported []string
+		for key, value := range v {
+			switch key {
+			case "context":
+				if context, ok := value.(string); ok {
+					bc.Context = context
+				} else {
+					unsupported = append(unsupported, key)
+				}
+			case "dockerfile":
+				if dockerfile, ok := value.(string); ok {
+					bc.Dockerfile = dockerfile
+				} else {
+					unsupported = append(unsupported, key)
+				}
+			default:
+				if !strings.HasPrefix(key, "x-") {
+					unsupported = append(unsupported, key)
+				}
+			}
 		}
-		if df, ok := v["dockerfile"].(string); ok {
-			bc.Dockerfile = df
-		}
-		return bc
+		sort.Strings(unsupported)
+		return bc, unsupported
 	}
-	return nil
+	return nil, []string{"<value>"}
 }
 
-func parsePorts(ports []string) []PortDef {
+func parsePorts(ports []string) ([]PortDef, []string, []string) {
 	if len(ports) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 
 	var defs []PortDef
+	var unsupported []string
+	var unsupportedMappings []string
 	for _, p := range ports {
-		def := parsePort(p)
+		def, mappingWarning := parsePort(p)
 		if def != nil {
 			defs = append(defs, *def)
+			if mappingWarning {
+				unsupportedMappings = append(unsupportedMappings, p)
+			}
+		} else {
+			unsupported = append(unsupported, p)
 		}
 	}
-	return defs
+	sort.Strings(unsupported)
+	sort.Strings(unsupportedMappings)
+	return defs, unsupported, unsupportedMappings
 }
 
-func parsePort(s string) *PortDef {
+func parsePort(s string) (*PortDef, bool) {
 	s = strings.TrimSpace(s)
 
-	protocol := ""
+	protocol := "TCP"
 	if idx := strings.Index(s, "/"); idx != -1 {
 		protocol = strings.ToUpper(s[idx+1:])
 		s = s[:idx]
+		if protocol != "TCP" {
+			return nil, false
+		}
 	}
 
-	parts := strings.Split(s, ":")
-	var containerPort string
-	hostMapped := false
-
-	switch len(parts) {
-	case 1:
-		containerPort = parts[0]
-	case 2:
-		containerPort = parts[1]
-		hostMapped = true
-	case 3:
-		containerPort = parts[2]
-		hostMapped = true
-	default:
-		return nil
+	hostIP, publishedPort, containerPort, hostMapped, ok := splitPortMapping(s)
+	if !ok {
+		return nil, false
+	}
+	port, err := strconv.ParseInt(containerPort, 10, 32)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, false
 	}
 
-	portRange := strings.Split(containerPort, "-")
-	port, err := strconv.ParseInt(portRange[0], 10, 32)
-	if err != nil {
-		return nil
+	published := port
+	if hostMapped {
+		published, err = strconv.ParseInt(publishedPort, 10, 32)
+		if err != nil || published <= 0 || published > 65535 {
+			return nil, false
+		}
 	}
 
 	def := &PortDef{
-		Port: int32(port),
-	}
-
-	if protocol != "" && protocol != "TCP" {
-		def.Protocol = protocol
+		Port:     int32(port),
+		Protocol: protocol,
 	}
 
 	def.Name = portName(int32(port), protocol)
 
-	if hostMapped && !isBackingServicePort(int32(port)) {
+	mappingWarning := false
+	if hostMapped {
 		def.Public = true
+		if published != port {
+			mappingWarning = true
+		}
+		if hostIP != "" {
+			ip := net.ParseIP(hostIP)
+			if ip == nil {
+				return nil, false
+			}
+			if !ip.IsUnspecified() {
+				def.Public = false
+				mappingWarning = true
+			}
+		}
 	}
 
-	return def
+	return def, mappingWarning
 }
 
-func isBackingServicePort(port int32) bool {
-	switch port {
-	case 5432:  // PostgreSQL
-		return true
-	case 3306:  // MySQL / MariaDB
-		return true
-	case 6379:  // Redis
-		return true
-	case 27017: // MongoDB
-		return true
-	case 9092:  // Kafka
-		return true
-	case 4222:  // NATS
-		return true
-	case 2181:  // ZooKeeper
-		return true
-	case 9200:  // Elasticsearch / OpenSearch
-		return true
-	case 5672:  // RabbitMQ (AMQP)
-		return true
-	case 11211: // Memcached
-		return true
-	case 8123:  // ClickHouse (HTTP)
-		return true
-	case 9000:  // ClickHouse (native)
-		return true
-	case 6650:  // Apache Pulsar
-		return true
-	case 7687:  // Neo4j (Bolt)
-		return true
-	case 8529:  // ArangoDB
-		return true
-	case 9042:  // Cassandra (CQL)
-		return true
-	case 7000:  // Cassandra (inter-node)
-		return true
-	case 6380:  // KeyDB / Valkey
-		return true
-	case 26257: // CockroachDB
-		return true
-	case 28015: // RethinkDB
-		return true
-	case 8086:  // InfluxDB
-		return true
-	case 1433:  // SQL Server
-		return true
-	case 1521:  // Oracle DB
-		return true
-	case 6363:  // Milvus (vector DB)
-		return true
-	case 19530: // Milvus (gRPC)
-		return true
-	case 6333:  // Qdrant (vector DB)
-		return true
-	case 8484:  // Weaviate (vector DB)
-		return true
+func splitPortMapping(value string) (hostIP, published, container string, mapped, ok bool) {
+	lastSeparator := strings.LastIndex(value, ":")
+	if lastSeparator < 0 {
+		if value == "" || strings.Contains(value, "-") {
+			return "", "", "", false, false
+		}
+		return "", "", value, false, true
 	}
-	return false
+
+	container = value[lastSeparator+1:]
+	prefix := value[:lastSeparator]
+	secondSeparator := strings.LastIndex(prefix, ":")
+	if secondSeparator < 0 {
+		if prefix == "" || container == "" || strings.Contains(prefix, "-") || strings.Contains(container, "-") {
+			return "", "", "", false, false
+		}
+		return "", prefix, container, true, true
+	}
+
+	hostIP = prefix[:secondSeparator]
+	published = prefix[secondSeparator+1:]
+	if strings.HasPrefix(hostIP, "[") && strings.HasSuffix(hostIP, "]") {
+		hostIP = strings.TrimSuffix(strings.TrimPrefix(hostIP, "["), "]")
+	} else if strings.Contains(hostIP, ":") {
+		return "", "", "", false, false
+	}
+	if hostIP == "" || published == "" || container == "" || strings.Contains(published, "-") || strings.Contains(container, "-") {
+		return "", "", "", false, false
+	}
+	return hostIP, published, container, true, true
 }
 
 func portName(port int32, _ string) string {
@@ -323,16 +442,26 @@ func portName(port int32, _ string) string {
 	}
 }
 
-func parseEnvironment(raw any) map[string]string {
+func parseEnvironment(raw any) (map[string]string, []string) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 
 	env := make(map[string]string)
+	var unresolved []string
 
 	switch v := raw.(type) {
 	case map[string]any:
 		for key, val := range v {
+			if val == nil {
+				unresolved = append(unresolved, key)
+				continue
+			}
+			switch val.(type) {
+			case map[string]any, []any:
+				unresolved = append(unresolved, key)
+				continue
+			}
 			env[key] = fmt.Sprintf("%v", val)
 		}
 	case []any:
@@ -341,32 +470,43 @@ func parseEnvironment(raw any) map[string]string {
 			if !ok {
 				continue
 			}
-			key, val, _ := strings.Cut(s, "=")
+			key, val, found := strings.Cut(s, "=")
+			if !found {
+				if key != "" {
+					unresolved = append(unresolved, key)
+				}
+				continue
+			}
 			env[key] = val
 		}
 	}
 
+	sort.Strings(unresolved)
 	if len(env) == 0 {
-		return nil
+		env = nil
 	}
-	return env
+	return env, unresolved
 }
 
-func parseVolumeMounts(volumes []string) []VolumeMountDef {
+func parseVolumeMounts(volumes []string) ([]VolumeMountDef, []string, []string) {
 	if len(volumes) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 
-	var mounts []VolumeMountDef
+	var (
+		mounts           []VolumeMountDef
+		unsupportedBinds []string
+		unsupported      []string
+	)
 	for _, v := range volumes {
-		parts := strings.SplitN(v, ":", 3)
-		if len(parts) < 2 {
+		source, target, mode, ok := splitVolumeMount(v)
+		if !ok {
+			unsupported = append(unsupported, v)
 			continue
 		}
-		source := parts[0]
-		target := parts[1]
 
-		if strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") {
+		if isBindMountSource(source) {
+			unsupportedBinds = append(unsupportedBinds, source)
 			continue
 		}
 
@@ -374,17 +514,59 @@ func parseVolumeMounts(volumes []string) []VolumeMountDef {
 			Name: source,
 			Path: target,
 		})
+		if mode != "" {
+			unsupported = append(unsupported, v)
+		}
 	}
 
 	if len(mounts) == 0 {
-		return nil
+		mounts = nil
 	}
-	return mounts
+	sort.Strings(unsupportedBinds)
+	sort.Strings(unsupported)
+	return mounts, unsupportedBinds, unsupported
 }
 
-func parseDependsOn(raw any) []string {
+func splitVolumeMount(value string) (string, string, string, bool) {
+	separator := strings.Index(value, ":")
+	if isWindowsDrivePath(value) {
+		rest := value[2:]
+		next := strings.Index(rest, ":")
+		if next < 0 {
+			return "", "", "", false
+		}
+		separator = next + 2
+	}
+	if separator <= 0 || separator == len(value)-1 {
+		return "", "", "", false
+	}
+	target := value[separator+1:]
+	mode := ""
+	if modeSeparator := strings.Index(target, ":"); modeSeparator >= 0 {
+		mode = target[modeSeparator+1:]
+		target = target[:modeSeparator]
+	}
+	if target == "" {
+		return "", "", "", false
+	}
+	return value[:separator], target, mode, true
+}
+
+func isWindowsDrivePath(value string) bool {
+	if len(value) < 3 || value[1] != ':' || (value[2] != '\\' && value[2] != '/') {
+		return false
+	}
+	drive := value[0]
+	return drive >= 'A' && drive <= 'Z' || drive >= 'a' && drive <= 'z'
+}
+
+func isBindMountSource(source string) bool {
+	return strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || isWindowsDrivePath(source)
+}
+
+func parseDependsOn(raw any) ([]string, []string) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 
 	switch v := raw.(type) {
@@ -395,16 +577,29 @@ func parseDependsOn(raw any) []string {
 				deps = append(deps, s)
 			}
 		}
-		return deps
+		return deps, nil
 	case map[string]any:
 		var deps []string
-		for name := range v {
+		var unsupported []string
+		for name, value := range v {
 			deps = append(deps, name)
+			switch options := value.(type) {
+			case nil:
+			case map[string]any:
+				for key := range options {
+					if !strings.HasPrefix(key, "x-") {
+						unsupported = append(unsupported, name+"."+key)
+					}
+				}
+			default:
+				unsupported = append(unsupported, name)
+			}
 		}
 		sort.Strings(deps)
-		return deps
+		sort.Strings(unsupported)
+		return deps, unsupported
 	}
-	return nil
+	return nil, []string{"<value>"}
 }
 
 func collectNamedVolumes(sf *Stackfile) {

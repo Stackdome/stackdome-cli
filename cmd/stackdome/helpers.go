@@ -1,12 +1,38 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
+
+type mutationResult struct {
+	Status   string `json:"status" yaml:"status"`
+	Resource string `json:"resource" yaml:"resource"`
+	Name     string `json:"name,omitempty" yaml:"name,omitempty"`
+	ID       string `json:"id,omitempty" yaml:"id,omitempty"`
+}
+
+func printMutationResult(ctx *cmdutil.CommandContext, result mutationResult, tableMessage string) error {
+	if !ctx.Formatter.IsTable() {
+		return ctx.Formatter.PrintStructured(result)
+	}
+	fmt.Fprintln(os.Stderr, tableMessage)
+	return nil
+}
+
+func redactSecrets(message string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "[REDACTED]")
+		}
+	}
+	return message
+}
 
 func resolveStackID(ctx *cmdutil.CommandContext, cmd *cobra.Command, flagStack string) (string, error) {
 	if flagStack != "" {
@@ -107,6 +133,11 @@ func resolveBuildID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, ar
 }
 
 func resolveReleaseID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, arg string) (string, error) {
+	// A full ID is already unambiguous and may refer to a historical release
+	// outside the first list page. Prefixes still use the list for expansion.
+	if looksLikeUUID(arg) {
+		return arg, nil
+	}
 	releases, err := ctx.Client.ListReleases(cmd.Context(), stackID)
 	if err != nil {
 		return "", err

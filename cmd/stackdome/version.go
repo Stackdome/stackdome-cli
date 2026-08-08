@@ -3,8 +3,8 @@ package main
 import (
 	"runtime"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
 )
 
 var (

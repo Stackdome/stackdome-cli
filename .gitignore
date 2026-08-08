@@ -5,3 +5,4 @@ bin/
 /stackfile.yaml
 /docs/superpowers/
 HANDOVER.md
+.vscode/

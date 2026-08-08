@@ -1,13 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/config"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/client"
-	"github.com/stackdome/cli/internal/config"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 func newSignupCmd() *cobra.Command {
@@ -64,8 +61,7 @@ func newSignupCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Account created. Logged in as %s\n", cfg.Username)
-			return nil
+			return printAuthenticationResult(cmd, cfg, true, "session")
 		},
 	}
 

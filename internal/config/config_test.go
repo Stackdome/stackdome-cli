@@ -151,6 +151,82 @@ func TestSetCurrentStackWithEnvTokenDoesNotWriteFile(t *testing.T) {
 	}
 }
 
+func TestSetCurrentStackWithEnvironmentSelectionOverrideDoesNotWriteFile(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "server", key: "STACKDOME_URL", value: "https://env.example"},
+		{name: "organization", key: "STACKDOME_ORG", value: "env-org"},
+		{name: "project", key: "STACKDOME_PROJECT", value: "env-project"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, `{"server_url":"https://file.example","access_token":"file-token","organization_id":"file-org","project_name":"default","current_stack":"file-stack"}`)
+			t.Setenv("STACKDOME_CONFIG", path)
+			t.Setenv(tt.key, tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cfg.SetCurrentStack("env-stack"); err != nil {
+				t.Fatalf("SetCurrentStack: %v", err)
+			}
+
+			persisted, err := LoadFrom(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.CurrentStack != "file-stack" {
+				t.Fatalf("persisted CurrentStack = %q, want file-stack", persisted.CurrentStack)
+			}
+		})
+	}
+}
+
+func TestEnvironmentSelectionOverrideHidesAndPreservesFileStack(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "server", key: "STACKDOME_URL", value: "https://env.example"},
+		{name: "token", key: "STACKDOME_TOKEN", value: "env-token"},
+		{name: "organization", key: "STACKDOME_ORG", value: "env-org"},
+		{name: "project", key: "STACKDOME_PROJECT", value: "env-project"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, `{"server_url":"https://file.example","access_token":"file-token","organization_id":"file-org","project_name":"default","current_stack":"file-stack"}`)
+			t.Setenv("STACKDOME_CONFIG", path)
+			t.Setenv(tt.key, tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.CurrentStack != "" {
+				t.Fatalf("environment-selected context inherited file stack %q", cfg.CurrentStack)
+			}
+			if err := cfg.Save(); err != nil {
+				t.Fatal(err)
+			}
+
+			persisted, err := LoadFrom(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.CurrentStack != "file-stack" {
+				t.Fatalf("persisted CurrentStack = %q, want file-stack", persisted.CurrentStack)
+			}
+		})
+	}
+}
+
 func TestLoadFrom_AdoptsLegacyTeamName(t *testing.T) {
 	cfg, err := LoadFrom(writeConfig(t, `{"server_url":"https://x","team_name":"acme"}`))
 	if err != nil {
@@ -216,5 +292,76 @@ func TestOrgAndProjectFromEnvNotPersisted(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "file-org") || !strings.Contains(string(data), "file-proj") {
 		t.Errorf("file scope was clobbered: %s", data)
+	}
+}
+
+func TestRequireStackErrorExplainsHowToSelectExistingStack(t *testing.T) {
+	cfg := &Config{ServerURL: "https://stackdome.example", AccessToken: "sdm_test"}
+	_, err := cfg.RequireStack()
+	if err == nil {
+		t.Fatal("RequireStack error = nil, want missing-stack guidance")
+	}
+	message := err.Error()
+	for _, want := range []string{"stackdome stack list", "stackdome stack use <name>", "--stack <name>"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("RequireStack error = %q, want %q", message, want)
+		}
+	}
+}
+
+func TestRequireStackWithEnvironmentTokenDoesNotRecommendPersistentSelection(t *testing.T) {
+	path := writeConfig(t, `{"server_url":"https://stackdome.example"}`)
+	t.Setenv("STACKDOME_CONFIG", path)
+	t.Setenv("STACKDOME_TOKEN", "sdm_ephemeral")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = cfg.RequireStack()
+	if err == nil {
+		t.Fatal("RequireStack error = nil, want missing-stack guidance")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome stack list") {
+		t.Fatalf("RequireStack error = %q, want list and --stack guidance", message)
+	}
+	if strings.Contains(message, "stack use") {
+		t.Fatalf("RequireStack error = %q, must not recommend a selection that an environment-token process cannot persist", message)
+	}
+}
+
+func TestRequireStackWithEnvironmentSelectionOverrideDoesNotRecommendPersistentSelection(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "server", key: "STACKDOME_URL", value: "https://env.example"},
+		{name: "organization", key: "STACKDOME_ORG", value: "env-org"},
+		{name: "project", key: "STACKDOME_PROJECT", value: "env-project"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, `{"server_url":"https://file.example","access_token":"file-token","organization_id":"file-org","project_name":"default"}`)
+			t.Setenv("STACKDOME_CONFIG", path)
+			t.Setenv(tt.key, tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = cfg.RequireStack()
+			if err == nil {
+				t.Fatal("RequireStack error = nil, want missing-stack guidance")
+			}
+			message := err.Error()
+			if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome stack list") {
+				t.Fatalf("RequireStack error = %q, want list and --stack guidance", message)
+			}
+			if strings.Contains(message, "stack use") {
+				t.Fatalf("RequireStack error = %q, must not recommend persistent selection under an environment override", message)
+			}
+		})
 	}
 }

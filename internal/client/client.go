@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -93,6 +93,8 @@ func New(baseURL string, opts ...Option) *Client {
 		base = http.DefaultTransport
 	}
 	cfg.HTTPClient.Transport = &refreshTransport{base: base, client: c}
+	configuredOrigin, _ := url.Parse(baseURL)
+	cfg.HTTPClient.CheckRedirect = sameOriginRedirectPolicy(configuredOrigin)
 
 	c.apiClient = serverapi.NewAPIClient(cfg)
 	c.applyAuth()
@@ -101,6 +103,8 @@ func New(baseURL string, opts ...Option) *Client {
 
 // noRetryKey marks the refresh call itself, so a 401 on it cannot recurse.
 type noRetryKey struct{}
+
+const replacementTokenURLHeader = "X-Stackdome-CLI-Replacement-Token-URL"
 
 // refreshTransport turns a 401 into one refresh + one retry. The server rotates
 // the refresh token on every use, so the new pair is persisted immediately.
@@ -115,7 +119,16 @@ func (t *refreshTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if err != nil || !shouldRefresh(resp) {
 		return resp, err
 	}
-	if req.Context().Value(noRetryKey{}) != nil || !t.client.canRefresh() {
+	if req.Context().Value(noRetryKey{}) != nil {
+		return resp, nil
+	}
+	if !t.client.canRefresh() {
+		if t.client.accessToken != "" {
+			if resp.Header == nil {
+				resp.Header = make(http.Header)
+			}
+			resp.Header.Set(replacementTokenURLHeader, t.client.replacementTokenURL())
+		}
 		return resp, nil
 	}
 
@@ -202,6 +215,10 @@ func (c *Client) canRefresh() bool {
 	return c.refreshToken != "" && !strings.HasPrefix(c.accessToken, "sdm_")
 }
 
+func (c *Client) replacementTokenURL() string {
+	return strings.TrimRight(c.baseURL, "/") + "/settings/api-tokens"
+}
+
 func (c *Client) API() *serverapi.DefaultApiService {
 	return c.apiClient.DefaultApi
 }
@@ -259,7 +276,22 @@ var errPersistTokens = errors.New("could not save refreshed credentials")
 
 func WrapError(httpResp *http.Response, err error, message string) error {
 	if httpResp != nil {
+		if replacementURL := httpResp.Header.Get(replacementTokenURLHeader); replacementURL != "" {
+			return clierrors.AuthError(fmt.Sprintf(
+				"API token was rejected. Create a replacement token at %s, then run `stackdome login --token <token>`.",
+				replacementURL,
+			))
+		}
 		reason := extractAPIReason(err)
+		if httpResp.StatusCode == http.StatusForbidden {
+			if reason == "" {
+				reason = err.Error()
+			}
+			return clierrors.New("Permission denied.").
+				WithCode("FORBIDDEN").
+				WithExitCode(clierrors.ExitAuth).
+				WithDetail(reason)
+		}
 		if reason != "" {
 			return clierrors.FromHTTP(httpResp.StatusCode, reason)
 		}
@@ -269,6 +301,10 @@ func WrapError(httpResp *http.Response, err error, message string) error {
 		return clierrors.Wrapf(err, "%s: request timed out", message)
 	}
 	return clierrors.Wrapf(err, "%s", message)
+}
+
+func wrapHTTPResponseError(httpResp *http.Response, message string) error {
+	return WrapError(httpResp, errors.New(message), message)
 }
 
 type bodyer interface {

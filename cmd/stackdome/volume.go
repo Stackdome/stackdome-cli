@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
 
 func newVolumeCmd() *cobra.Command {
@@ -70,18 +70,23 @@ func newVolumeCreateCmd() *cobra.Command {
 	var (
 		flagSize       string
 		flagAccessMode string
+		flagStack      string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "create <name>",
-		Short: "Create a volume",
+		Short: "Create a volume in the current stack",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if flagSize == "" {
 				return clierrors.ValidationError("--size is required (e.g. 5Gi)")
 			}
+			stackID, err := resolveStackID(ctx, cmd, flagStack)
+			if err != nil {
+				return err
+			}
 
-			volume, err := ctx.Client.CreateVolume(cmd.Context(), args[0], flagSize, flagAccessMode)
+			volume, err := ctx.Client.CreateVolume(cmd.Context(), stackID, args[0], flagSize, flagAccessMode)
 			if err != nil {
 				return err
 			}
@@ -97,6 +102,7 @@ func newVolumeCreateCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flagSize, "size", "", "Volume size (e.g. 5Gi)")
 	cmd.Flags().StringVar(&flagAccessMode, "access-mode", "ReadWriteOnce", "Access mode (ReadWriteOnce, ReadWriteMany, ReadOnlyMany)")
+	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 	return cmd
 }
 
@@ -132,8 +138,12 @@ func newVolumeDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Volume %q deleted.\n", args[0])
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deleted",
+				Resource: "volume",
+				Name:     args[0],
+				ID:       volume.GetId(),
+			}, fmt.Sprintf("Volume %q deleted.", args[0]))
 		})),
 	}
 

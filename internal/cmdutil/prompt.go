@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"golang.org/x/term"
 )
 

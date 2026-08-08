@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newStackCmd() *cobra.Command {
@@ -17,9 +17,47 @@ func newStackCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newStackListCmd())
+	cmd.AddCommand(newStackUseCmd())
 	cmd.AddCommand(newStackInfoCmd())
 	cmd.AddCommand(newStackDeleteCmd())
 	return cmd
+}
+
+func newStackUseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "use <stack>",
+		Aliases: []string{"select"},
+		Short:   "Select the current stack by name or ID",
+		Args:    cobra.ExactArgs(1),
+		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			return selectStackContext(ctx, cmd, args[0], "stack use")
+		}),
+	}
+}
+
+func selectStackContext(ctx *cmdutil.CommandContext, cmd *cobra.Command, ref, commandName string) error {
+	if err := ctx.Config.RequireAuth(); err != nil {
+		return err
+	}
+	if ctx.Config.StackContextFromEnv() {
+		return clierrors.ValidationError(commandName + " cannot persist a selection while STACKDOME_URL, STACKDOME_TOKEN, STACKDOME_ORG, or STACKDOME_PROJECT controls the active context; unset the override or pass --stack to the command instead")
+	}
+	if err := cmdutil.ResolveScope(ctx, cmd); err != nil {
+		return err
+	}
+	id, err := resolveStackRef(ctx, cmd, ref)
+	if err != nil {
+		return err
+	}
+	if err := ctx.Config.SetCurrentStack(id); err != nil {
+		return err
+	}
+	return printMutationResult(ctx, mutationResult{
+		Status:   "selected",
+		Resource: "stack",
+		Name:     ref,
+		ID:       id,
+	}, fmt.Sprintf("Current stack set to %s (%s)", ref, id))
 }
 
 func newStackListCmd() *cobra.Command {
@@ -66,16 +104,17 @@ func newStackListCmd() *cobra.Command {
 
 func newStackInfoCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "info <name>",
-		Short: "Show detailed stack info",
+		Use:   "info <stack>",
+		Short: "Show detailed stack info by name or ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			stack, err := ctx.Client.FindStackByName(cmd.Context(), args[0])
+			stackID, err := resolveStackRef(ctx, cmd, args[0])
 			if err != nil {
 				return err
 			}
-			if stack == nil {
-				return clierrors.NotFoundError("Stack", args[0])
+			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
+			if err != nil {
+				return err
 			}
 
 			if !ctx.Formatter.IsTable() {
@@ -121,8 +160,12 @@ func newStackDeleteCmd() *cobra.Command {
 				_ = ctx.Config.SetCurrentStack("")
 			}
 
-			fmt.Fprintf(os.Stderr, "Stack %q deletion initiated.\n", stack.Name)
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deletion_initiated",
+				Resource: "stack",
+				Name:     stack.Name,
+				ID:       stack.GetId(),
+			}, fmt.Sprintf("Stack %q deletion initiated.", stack.Name))
 		})),
 	}
 

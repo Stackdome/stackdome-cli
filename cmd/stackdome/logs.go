@@ -1,14 +1,20 @@
 package main
 
 import (
-	"fmt"
-	"os"
+	"context"
+	"encoding/json"
 
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/client"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
 )
+
+type logEvent struct {
+	Event string `json:"event"`
+	Data  any    `json:"data"`
+}
 
 func newLogsCmd() *cobra.Command {
 	var (
@@ -23,6 +29,9 @@ func newLogsCmd() *cobra.Command {
 		Short: "Stream logs from a stack or resource",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			if err := output.ValidateStreamingFormat(ctx.Formatter.Format); err != nil {
+				return err
+			}
 			stackID, err := resolveStackID(ctx, cmd, flagStack)
 			if err != nil {
 				return err
@@ -41,21 +50,26 @@ func newLogsCmd() *cobra.Command {
 
 			stream, err := ctx.Client.StreamLogs(cmd.Context(), stackID, resourceName, opts)
 			if err != nil {
+				if cmd.Context().Err() == context.Canceled {
+					return clierrors.ErrUserCanceled
+				}
 				return err
 			}
 			defer stream.Close()
 
-			return client.ParseSSEStream(stream, func(e client.SSEEvent) error {
+			err = client.ParseSSEStream(stream, func(e client.SSEEvent) error {
 				if e.Event == "error" {
-					fmt.Fprintf(os.Stderr, "Error: %s\n", e.Data)
 					return clierrors.New(e.Data)
 				}
 				if e.IsEnd() {
 					return nil
 				}
-				fmt.Println(e.Data)
-				return nil
+				return printLogEvent(ctx.Formatter, e)
 			})
+			if cmd.Context().Err() == context.Canceled {
+				return clierrors.ErrUserCanceled
+			}
+			return err
 		})),
 	}
 
@@ -65,4 +79,17 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 
 	return cmd
+}
+
+func printLogEvent(formatter *output.Formatter, event client.SSEEvent) error {
+	if formatter.Format != output.FormatJSON {
+		formatter.Println(event.Data)
+		return nil
+	}
+
+	var data any
+	if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+		data = event.Data
+	}
+	return formatter.PrintJSONLine(logEvent{Event: event.Event, Data: data})
 }

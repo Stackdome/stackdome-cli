@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/client"
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/spf13/cobra"
 )
 
 func TestResolveIDPrefix(t *testing.T) {
@@ -58,5 +64,32 @@ func TestLooksLikeUUID(t *testing.T) {
 		if got := looksLikeUUID(in); got != want {
 			t.Errorf("looksLikeUUID(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestResolveReleaseIDFullUUIDSkipsReleaseList(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer ts.Close()
+
+	c := client.New(ts.URL, client.WithTokens("access", ""), client.WithOrgAndProject("org-1", "proj-1"))
+	ctx := &cmdutil.CommandContext{Client: c}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	fullID := "22222222-2222-2222-2222-222222222222"
+
+	got, err := resolveReleaseID(ctx, cmd, "11111111-1111-1111-1111-111111111111", fullID)
+	if err != nil {
+		t.Fatalf("resolve full release UUID: %v", err)
+	}
+	if got != fullID {
+		t.Errorf("release ID = %q, want %q", got, fullID)
+	}
+	if requests != 0 {
+		t.Errorf("release list requests = %d, want 0", requests)
 	}
 }

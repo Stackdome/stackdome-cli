@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	clierrors "github.com/stackdome/cli/internal/errors"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 )
 
 type LogOptions struct {
@@ -48,10 +48,7 @@ func (c *Client) openLogStream(ctx context.Context, path string, opts LogOptions
 	// `-f` follows a log stream indefinitely; reuse the configured transport (so
 	// token refresh still applies) but not its 30s whole-request timeout. The
 	// context governs the stream's lifetime.
-	httpClient := &http.Client{}
-	if c.cfg.HTTPClient != nil {
-		httpClient.Transport = c.cfg.HTTPClient.Transport
-	}
+	httpClient := c.streamHTTPClient()
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -59,9 +56,22 @@ func (c *Client) openLogStream(ctx context.Context, path string, opts LogOptions
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		streamErr := wrapHTTPResponseError(resp, "Log streaming failed")
 		resp.Body.Close()
-		return nil, clierrors.FromHTTP(resp.StatusCode, "Log streaming failed")
+		return nil, streamErr
 	}
 
 	return resp.Body, nil
+}
+
+// streamHTTPClient keeps a stream's lifetime under its context rather than the
+// default whole-request timeout, while retaining the configured auth-aware
+// transport and redirect boundary.
+func (c *Client) streamHTTPClient() *http.Client {
+	httpClient := &http.Client{}
+	if c.cfg.HTTPClient != nil {
+		httpClient.Transport = c.cfg.HTTPClient.Transport
+		httpClient.CheckRedirect = c.cfg.HTTPClient.CheckRedirect
+	}
+	return httpClient
 }

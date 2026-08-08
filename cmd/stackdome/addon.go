@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	"github.com/Stackdome/stackdome-cli/internal/output"
 	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
-	"github.com/stackdome/cli/internal/cmdutil"
-	clierrors "github.com/stackdome/cli/internal/errors"
-	"github.com/stackdome/cli/internal/output"
 )
 
 func newAddonCmd() *cobra.Command {
@@ -43,6 +45,8 @@ func newPostgresCreateCmd() *cobra.Command {
 		flagVersion   int32
 		flagInstances int32
 		flagStorage   string
+		flagWait      bool
+		flagTimeout   time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -73,12 +77,29 @@ func newPostgresCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if flagWait {
+				if created.Id == nil || *created.Id == "" {
+					return clierrors.New("Created postgres addon response had no ID; cannot wait for readiness.")
+				}
+				waitCtx, cancel := waitContext(cmd.Context(), flagTimeout)
+				defer cancel()
+				waitCmd := *cmd
+				waitCmd.SetContext(waitCtx)
+				created, err = waitForPostgresAddon(ctx, &waitCmd, *created.Id, created.Name)
+				if err := postgresWaitCommandError(cmd.Context(), waitCtx, createdName(addon, created), err); err != nil {
+					return err
+				}
+			}
 
 			if !ctx.Formatter.IsTable() {
 				return ctx.Formatter.PrintStructured(created)
 			}
 
-			fmt.Fprintf(os.Stderr, "Postgres addon %q created.\n", created.Name)
+			if flagWait {
+				fmt.Fprintf(os.Stderr, "Postgres addon %q is %s.\n", created.Name, created.Status.GetState())
+			} else {
+				fmt.Fprintf(os.Stderr, "Postgres addon %q created.\n", created.Name)
+			}
 			return nil
 		})),
 	}
@@ -88,7 +109,61 @@ func newPostgresCreateCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&flagVersion, "version", 16, "PostgreSQL major version (13-17)")
 	cmd.Flags().Int32Var(&flagInstances, "instances", 1, "Number of instances (1-5)")
 	cmd.Flags().StringVar(&flagStorage, "storage", "10Gi", "Storage size")
+	cmd.Flags().BoolVarP(&flagWait, "wait", "w", false, "Wait for the PostgreSQL addon to become ready")
+	cmd.Flags().DurationVar(&flagTimeout, "timeout", defaultWaitTimeout, "Maximum time to wait for the PostgreSQL addon")
 	return cmd
+}
+
+const postgresWaitPollInterval = 2 * time.Second
+
+func waitForPostgresAddon(ctx *cmdutil.CommandContext, cmd *cobra.Command, addonID, name string) (*openapi.PostgresAddon, error) {
+	ticker := time.NewTicker(postgresWaitPollInterval)
+	defer ticker.Stop()
+
+	for {
+		addon, err := ctx.Client.GetPostgresAddon(cmd.Context(), addonID)
+		if err != nil {
+			return nil, err
+		}
+		state := ""
+		message := ""
+		if addon.Status != nil {
+			state = addon.Status.GetState()
+			message = addon.Status.GetMessage()
+		}
+		switch state {
+		case "Ready", "Running":
+			return addon, nil
+		case "Failed", "Error":
+			if message != "" {
+				return nil, clierrors.Newf("Postgres addon %q entered terminal state %s: %s", name, state, message)
+			}
+			return nil, clierrors.Newf("Postgres addon %q entered terminal state %s", name, state)
+		}
+
+		select {
+		case <-cmd.Context().Done():
+			return nil, cmd.Context().Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func postgresWaitCommandError(parent, wait context.Context, name string, err error) error {
+	if parent.Err() != nil {
+		return clierrors.ErrUserCanceled
+	}
+	if wait.Err() == context.DeadlineExceeded {
+		return clierrors.Newf("Timed out waiting for postgres addon %q to become ready.", name).WithCode("TIMEOUT")
+	}
+	return err
+}
+
+func createdName(request openapi.PostgresAddon, response *openapi.PostgresAddon) string {
+	if response != nil && response.Name != "" {
+		return response.Name
+	}
+	return request.Name
 }
 
 func newPostgresListCmd() *cobra.Command {
@@ -189,8 +264,12 @@ func newPostgresDeleteCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(os.Stderr, "Postgres addon %q deleted.\n", args[0])
-			return nil
+			return printMutationResult(ctx, mutationResult{
+				Status:   "deleted",
+				Resource: "postgres_addon",
+				Name:     args[0],
+				ID:       addon.GetId(),
+			}, fmt.Sprintf("Postgres addon %q deleted.", args[0]))
 		})),
 	}
 
