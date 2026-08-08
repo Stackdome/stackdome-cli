@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +70,192 @@ func buildWith(state string, conds []openapi.Condition) openapi.ImageBuild {
 		b.Status.State = &state
 	}
 	return b
+}
+
+func TestBuildReferenceUsesCommitAndUniqueBuildSuffix(t *testing.T) {
+	commit := "7bc067e829eb9380539878b72d8b64ac017b487a"
+	builds := []struct {
+		name  string
+		build openapi.ImageBuild
+		want  string
+	}{
+		{
+			name: "git build",
+			build: openapi.ImageBuild{
+				Id: openapi.PtrString("api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e849a"),
+				SourceRevision: openapi.BuildSourceRevision{
+					GitRepoRevision: &openapi.GitRepoRevision{Commit: &commit},
+				},
+			},
+			want: "7bc067e-fe0e849a",
+		},
+		{
+			name: "rebuild of same commit",
+			build: openapi.ImageBuild{
+				Id: openapi.PtrString("api-server-7bc067e829eb9380539878b72d8b64ac017b487a-a2a97d0d"),
+				SourceRevision: openapi.BuildSourceRevision{
+					GitRepoRevision: &openapi.GitRepoRevision{Commit: &commit},
+				},
+			},
+			want: "7bc067e-a2a97d0d",
+		},
+		{
+			name: "volume build",
+			build: openapi.ImageBuild{
+				Id: openapi.PtrString("worker-volume-source-11223344"),
+				SourceRevision: openapi.BuildSourceRevision{
+					VolumeSourceRevision: &openapi.BuildSourceRevisionVolumeSourceRevision{},
+				},
+			},
+			want: "volume-11223344",
+		},
+	}
+
+	for _, tt := range builds {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildReference(tt.build); got != tt.want {
+				t.Fatalf("buildReference() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildListShowsCopyableBuildReferences(t *testing.T) {
+	const stackID = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/organizations/org-1/projects/proj-1/stacks/"+stackID+"/builds" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[
+			{"id":"api-server-a214e9a114b01a17c7c4ad576543810eb3a4f421-3e794668","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"branch":"feat/alpha-observability-p0","commit":"a214e9a114b01a17c7c4ad576543810eb3a4f421"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Success"}},
+			{"id":"api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e849a","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"branch":"feat/alpha-observability-p0","commit":"7bc067e829eb9380539878b72d8b64ac017b487a"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Success"}}
+		]}`))
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL:      ts.URL,
+		AccessToken:    "sdm_test",
+		OrganizationID: "org-1",
+		ProjectName:    "proj-1",
+		CurrentStack:   stackID,
+	}, output.FormatTable, slog.LevelError)
+	var stdout bytes.Buffer
+	ctx.Formatter.Writer = &stdout
+	cmd := newBuildListCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build list: %v", err)
+	}
+
+	for _, want := range []string{"BUILD", "a214e9a-3e794668", "7bc067e-fe0e849a"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("build list output omitted %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestBuildInfoAcceptsDisplayedBuildReference(t *testing.T) {
+	const (
+		stackID = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+		buildID = "api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e849a"
+	)
+	buildJSON := `{"id":"` + buildID + `","stack_id":"` + stackID + `","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"branch":"feat/alpha-observability-p0","commit":"7bc067e829eb9380539878b72d8b64ac017b487a"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Success"}}`
+	var gotInfoPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds":
+			_, _ = w.Write([]byte(`{"items":[` + buildJSON + `]}`))
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds/" + buildID:
+			gotInfoPath = r.URL.Path
+			_, _ = w.Write([]byte(buildJSON))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL:      ts.URL,
+		AccessToken:    "sdm_test",
+		OrganizationID: "org-1",
+		ProjectName:    "proj-1",
+		CurrentStack:   stackID,
+	}, output.FormatJSON, slog.LevelError)
+	var stdout bytes.Buffer
+	ctx.Formatter.Writer = &stdout
+	cmd := newBuildInfoCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"7bc067e-fe0e849a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build info by displayed reference: %v", err)
+	}
+	if !strings.HasSuffix(gotInfoPath, "/builds/"+buildID) {
+		t.Fatalf("build info path = %q, want full build ID", gotInfoPath)
+	}
+	var got openapi.ImageBuild
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("build info output is not JSON: %v\n%s", err, stdout.String())
+	}
+	if got.GetId() != buildID {
+		t.Fatalf("build info ID = %q, want %q", got.GetId(), buildID)
+	}
+}
+
+func TestBuildInfoTableShowsReferenceAndFullID(t *testing.T) {
+	const (
+		stackID = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+		buildID = "api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e849a"
+	)
+	buildJSON := `{"id":"` + buildID + `","stack_id":"` + stackID + `","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"branch":"feat/alpha-observability-p0","commit":"7bc067e829eb9380539878b72d8b64ac017b487a"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Success"}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds":
+			_, _ = w.Write([]byte(`{"items":[` + buildJSON + `]}`))
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds/" + buildID:
+			_, _ = w.Write([]byte(buildJSON))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL:      ts.URL,
+		AccessToken:    "sdm_test",
+		OrganizationID: "org-1",
+		ProjectName:    "proj-1",
+		CurrentStack:   stackID,
+	}, output.FormatTable, slog.LevelError)
+	var stdout bytes.Buffer
+	ctx.Formatter.Writer = &stdout
+	cmd := newBuildInfoCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"7bc067e-fe0e849a"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("build info by displayed reference: %v", err)
+	}
+	for _, want := range []string{
+		"Build:     7bc067e-fe0e849a",
+		"ID:        " + buildID,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("build info output omitted %q:\n%s", want, stdout.String())
+		}
+	}
 }
 
 func TestBuildDurationConditionFallback(t *testing.T) {
@@ -233,6 +420,106 @@ func TestBuildLogsJSONWritesDecodedNDJSONEvent(t *testing.T) {
 	}
 	if lines[0].Event != "build" || lines[0].Data.Phase != "compile" || lines[1].Event != "build" || lines[1].Data.Phase != "package" {
 		t.Errorf("lines = %#v, want compile and package build events", lines)
+	}
+}
+
+func TestBuildLogsPrunedErrorUsesCopyableReferenceWithoutClusterInternals(t *testing.T) {
+	const (
+		stackID  = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+		buildID  = "api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e8490"
+		buildRef = "7bc067e-fe0e8490"
+	)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds":
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + buildID + `","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"commit":"7bc067e829eb9380539878b72d8b64ac017b487a"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Success"}}]}`))
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds/" + buildID + "/logs":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"reason":"no logs available for build ` + buildID + `: no build pod found for job api-server-c4dfdf78-build: the build has not started yet or its logs have been pruned"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL:      ts.URL,
+		AccessToken:    "sdm_test",
+		OrganizationID: "org-1",
+		ProjectName:    "proj-1",
+		CurrentStack:   stackID,
+	}, output.FormatTable, slog.LevelError)
+	cmd := newBuildLogsCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"-f", buildRef})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("build logs error = nil, want pruned-logs error")
+	}
+	got := clierrors.UserMessage(err)
+	want := `Logs for build "7bc067e-fe0e8490" are no longer available; they were pruned after the build completed.`
+	if got != want {
+		t.Fatalf("user message = %q, want %q", got, want)
+	}
+	for _, leaked := range []string{buildID, "build pod", "api-server-c4dfdf78-build"} {
+		if strings.Contains(got, leaked) {
+			t.Errorf("user message leaks cluster detail %q: %s", leaked, got)
+		}
+	}
+	var cliErr *clierrors.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != "NOT_FOUND" || cliErr.ExitCode != clierrors.ExitNotFound {
+		t.Errorf("error = %#v, want NOT_FOUND with exit code %d", err, clierrors.ExitNotFound)
+	}
+}
+
+func TestBuildLogsUnavailableForPendingBuildDoesNotClaimPruning(t *testing.T) {
+	const (
+		stackID  = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+		buildID  = "api-server-7bc067e829eb9380539878b72d8b64ac017b487a-fe0e8490"
+		buildRef = "7bc067e-fe0e8490"
+	)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds":
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + buildID + `","stack_resource_id":"resource-1","stack_resource_name":"api-server","source_revision":{"git_repo_revision":{"commit":"7bc067e829eb9380539878b72d8b64ac017b487a"}},"build_context":{},"image_repo":"example.invalid/api","status":{"state":"Pending"}}]}`))
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/builds/" + buildID + "/logs":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"reason":"no logs available for build ` + buildID + `: no build pod found for job api-server-c4dfdf78-build: the build has not started yet or its logs have been pruned"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL:      ts.URL,
+		AccessToken:    "sdm_test",
+		OrganizationID: "org-1",
+		ProjectName:    "proj-1",
+		CurrentStack:   stackID,
+	}, output.FormatTable, slog.LevelError)
+	cmd := newBuildLogsCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"-f", buildRef})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("build logs error = nil, want unavailable-logs error")
+	}
+	got := clierrors.UserMessage(err)
+	want := `Logs for build "7bc067e-fe0e8490" are not available yet; the build has not started.`
+	if got != want {
+		t.Fatalf("user message = %q, want %q", got, want)
+	}
+	if strings.Contains(strings.ToLower(got), "pruned") {
+		t.Fatalf("pending-build message incorrectly claims pruning: %s", got)
 	}
 }
 

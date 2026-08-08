@@ -7,6 +7,7 @@ import (
 
 	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 )
 
@@ -121,15 +122,49 @@ func resolveIDPrefix(kind, arg string, ids []string) (string, error) {
 }
 
 func resolveBuildID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, arg string) (string, error) {
-	builds, err := ctx.Client.ListBuilds(cmd.Context(), stackID)
+	build, err := resolveBuild(ctx, cmd, stackID, arg)
 	if err != nil {
 		return "", err
 	}
-	ids := make([]string, 0, len(builds))
-	for _, b := range builds {
-		ids = append(ids, b.GetId())
+	return build.GetId(), nil
+}
+
+func resolveBuild(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, arg string) (openapi.ImageBuild, error) {
+	builds, err := ctx.Client.ListBuilds(cmd.Context(), stackID)
+	if err != nil {
+		return openapi.ImageBuild{}, err
 	}
-	return resolveIDPrefix("Build", arg, ids)
+	ids := make([]string, 0, len(builds))
+	buildsByID := make(map[string]openapi.ImageBuild, len(builds))
+	refMatches := make([]openapi.ImageBuild, 0, 1)
+	for _, b := range builds {
+		id := b.GetId()
+		if id == arg {
+			return b, nil
+		}
+		ids = append(ids, id)
+		buildsByID[id] = b
+		if buildReference(b) == arg {
+			refMatches = append(refMatches, b)
+		}
+	}
+	switch len(refMatches) {
+	case 1:
+		return refMatches[0], nil
+	case 0:
+		id, resolveErr := resolveIDPrefix("Build", arg, ids)
+		if resolveErr != nil {
+			return openapi.ImageBuild{}, resolveErr
+		}
+		return buildsByID[id], nil
+	default:
+		matchingIDs := make([]string, len(refMatches))
+		for i := range refMatches {
+			matchingIDs[i] = refMatches[i].GetId()
+		}
+		return openapi.ImageBuild{}, clierrors.ValidationError(
+			"Ambiguous Build reference \"" + arg + "\": matches " + strings.Join(matchingIDs, ", "))
+	}
 }
 
 func resolveReleaseID(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, arg string) (string, error) {
