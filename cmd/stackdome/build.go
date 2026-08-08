@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Stackdome/stackdome-cli/internal/client"
@@ -47,10 +50,11 @@ func newBuildLogsCmd() *cobra.Command {
 				return err
 			}
 
-			buildID, err := resolveBuildID(ctx, cmd, stackID, args[0])
+			build, err := resolveBuild(ctx, cmd, stackID, args[0])
 			if err != nil {
 				return err
 			}
+			buildID := build.GetId()
 
 			stream, err := ctx.Client.StreamBuildLogs(cmd.Context(), stackID, buildID, client.LogOptions{
 				Follow: flagFollow,
@@ -61,7 +65,7 @@ func newBuildLogsCmd() *cobra.Command {
 				if cmd.Context().Err() == context.Canceled {
 					return clierrors.ErrUserCanceled
 				}
-				return err
+				return friendlyBuildLogsError(args[0], build, err)
 			}
 			defer stream.Close()
 
@@ -86,6 +90,31 @@ func newBuildLogsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagSince, "since", "", "Show logs since duration (e.g. 5m, 1h)")
 	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
 	return cmd
+}
+
+func friendlyBuildLogsError(buildRef string, build openapi.ImageBuild, err error) error {
+	var cliErr *clierrors.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != "NOT_FOUND" {
+		return err
+	}
+
+	reason := strings.ToLower(cliErr.Detail)
+	if !strings.Contains(reason, "logs have been pruned") &&
+		!strings.Contains(reason, "no longer exists in the cluster") {
+		return err
+	}
+
+	message := fmt.Sprintf("Logs for build %q are not available yet; the build has not started.", buildRef)
+	if buildIsTerminal(build) {
+		message = fmt.Sprintf("Logs for build %q are no longer available; they were pruned after the build completed.", buildRef)
+	}
+
+	return &clierrors.CLIError{
+		Message:  message,
+		Code:     "NOT_FOUND",
+		ExitCode: clierrors.ExitNotFound,
+		Cause:    err,
+	}
 }
 
 func newBuildListCmd() *cobra.Command {
@@ -122,10 +151,10 @@ func newBuildListCmd() *cobra.Command {
 				return nil
 			}
 
-			tbl := ctx.Formatter.NewTable("ID", "RESOURCE", "STATE", "SOURCE", "STARTED", "DURATION")
+			tbl := ctx.Formatter.NewTable("BUILD", "RESOURCE", "STATE", "SOURCE", "STARTED", "DURATION")
 			for _, b := range builds {
 				tbl.AddRow(
-					shortID(b.GetId()),
+					buildReference(b),
 					b.StackResourceName,
 					buildStateColor(b),
 					buildSource(b),
@@ -171,7 +200,7 @@ func newBuildInfoCmd() *cobra.Command {
 				return ctx.Formatter.PrintStructured(build)
 			}
 
-			renderBuildInfo(build)
+			renderBuildInfo(ctx.Formatter.Writer, build)
 			return nil
 		})),
 	}
@@ -180,37 +209,38 @@ func newBuildInfoCmd() *cobra.Command {
 	return cmd
 }
 
-func renderBuildInfo(b *openapi.ImageBuild) {
-	fmt.Printf("Build:     %s\n", b.GetId())
-	fmt.Printf("Resource:  %s\n", b.StackResourceName)
-	fmt.Printf("State:     %s\n", buildStateColor(*b))
-	fmt.Printf("Source:    %s\n", buildSource(*b))
+func renderBuildInfo(w io.Writer, b *openapi.ImageBuild) {
+	fmt.Fprintf(w, "Build:     %s\n", buildReference(*b))
+	fmt.Fprintf(w, "ID:        %s\n", b.GetId())
+	fmt.Fprintf(w, "Resource:  %s\n", b.StackResourceName)
+	fmt.Fprintf(w, "State:     %s\n", buildStateColor(*b))
+	fmt.Fprintf(w, "Source:    %s\n", buildSource(*b))
 
 	if b.Status != nil && b.Status.ImageUrl != nil && *b.Status.ImageUrl != "" {
-		fmt.Printf("Image:     %s\n", *b.Status.ImageUrl)
+		fmt.Fprintf(w, "Image:     %s\n", *b.Status.ImageUrl)
 	}
 
 	if start := buildStartTime(*b); start != nil {
-		fmt.Printf("Started:   %s\n", start.Local().Format(time.RFC3339))
+		fmt.Fprintf(w, "Started:   %s\n", start.Local().Format(time.RFC3339))
 	}
 
-	fmt.Printf("Duration:  %s\n", buildDuration(*b))
+	fmt.Fprintf(w, "Duration:  %s\n", buildDuration(*b))
 
 	if b.Status != nil && b.Status.LastBuildFailureDetail != nil {
 		f := b.Status.LastBuildFailureDetail
-		fmt.Println()
-		fmt.Println("Failure:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Failure:")
 		if f.FailureType != nil {
-			fmt.Printf("  Type:    %s\n", *f.FailureType)
+			fmt.Fprintf(w, "  Type:    %s\n", *f.FailureType)
 		}
 		if f.Reason != nil {
-			fmt.Printf("  Reason:  %s\n", *f.Reason)
+			fmt.Fprintf(w, "  Reason:  %s\n", *f.Reason)
 		}
 		if f.Message != nil {
-			fmt.Printf("  Message: %s\n", *f.Message)
+			fmt.Fprintf(w, "  Message: %s\n", *f.Message)
 		}
 		if f.ExitCode != nil {
-			fmt.Printf("  Exit:    %d\n", *f.ExitCode)
+			fmt.Fprintf(w, "  Exit:    %d\n", *f.ExitCode)
 		}
 	}
 }
@@ -220,6 +250,30 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+// buildReference is the short, copyable identifier shown by build list.
+// Build IDs begin with the resource name, so the generic first-eight-character
+// shortID hides every distinguishing character for builds of one resource.
+// The source revision identifies what was built; the ID suffix distinguishes
+// repeated builds of the same revision.
+func buildReference(b openapi.ImageBuild) string {
+	idSuffix := b.GetId()
+	if len(idSuffix) > 8 {
+		idSuffix = idSuffix[len(idSuffix)-8:]
+	}
+
+	if git := b.SourceRevision.GitRepoRevision; git != nil && git.Commit != nil && *git.Commit != "" {
+		commit := *git.Commit
+		if len(commit) > 7 {
+			commit = commit[:7]
+		}
+		return commit + "-" + idSuffix
+	}
+	if b.SourceRevision.VolumeSourceRevision != nil {
+		return "volume-" + idSuffix
+	}
+	return idSuffix
 }
 
 func buildStateColor(b openapi.ImageBuild) string {

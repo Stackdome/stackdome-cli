@@ -304,7 +304,14 @@ func WrapError(httpResp *http.Response, err error, message string) error {
 }
 
 func wrapHTTPResponseError(httpResp *http.Response, message string) error {
-	return WrapError(httpResp, errors.New(message), message)
+	responseErr := errors.New(message)
+	if httpResp != nil && httpResp.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(httpResp.Body, 1<<20))
+		if err == nil && len(bytes.TrimSpace(body)) > 0 {
+			responseErr = errors.New(string(body))
+		}
+	}
+	return WrapError(httpResp, responseErr, message)
 }
 
 type bodyer interface {
