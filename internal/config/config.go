@@ -240,9 +240,9 @@ func (c *Config) RequireStack() (string, error) {
 	}
 	if c.CurrentStack == "" {
 		if c.StackContextFromEnv() {
-			return "", clierrors.New("No stack selected. Run `stackdome stack list`, then pass `--stack <name>`; environment-controlled contexts do not persist stack selection.")
+			return "", clierrors.New("No stack selected. Run `stackdome get stacks`, then pass `--stack <name>`; environment-controlled contexts do not persist stack selection.")
 		}
-		return "", clierrors.New("No stack selected. Run `stackdome stack list`, then `stackdome stack use <name>`; or pass `--stack <name>`.")
+		return "", clierrors.New("No stack selected. Run `stackdome get stacks`, then `stackdome use stack <name>`; or pass `--stack <name>`.")
 	}
 	return c.CurrentStack, nil
 }

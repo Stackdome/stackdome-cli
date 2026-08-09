@@ -7,6 +7,7 @@ import (
 	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/Stackdome/stackdome-cli/internal/output"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,7 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status [resource]",
 		Short: "Show stack and resource status",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if flagWatch {
 				if err := output.ValidateStreamingFormat(ctx.Formatter.Format); err != nil {
@@ -35,9 +37,13 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			resourceName := ""
+			if len(args) == 1 {
+				resourceName = args[0]
+			}
 
 			if flagWatch {
-				return watchStatus(ctx, cmd, stackID, flagConditions)
+				return watchStatus(ctx, cmd, stackID, resourceName, flagConditions)
 			}
 
 			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
@@ -45,6 +51,10 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			live, err := ctx.Client.GetStackLiveStatus(cmd.Context(), stack)
+			if err != nil {
+				return err
+			}
+			stack, live, err = filterStatusResource(stack, live, resourceName)
 			if err != nil {
 				return err
 			}
@@ -65,7 +75,42 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string, showConditions bool) error {
+func filterStatusResource(stack *openapi.Stack, live *openapi.ReleaseLiveStatus, resourceName string) (*openapi.Stack, *openapi.ReleaseLiveStatus, error) {
+	if resourceName == "" {
+		return stack, live, nil
+	}
+
+	var selected *openapi.StackResource
+	for i := range stack.Spec.StackResources {
+		if stack.Spec.StackResources[i].Name == resourceName {
+			resource := stack.Spec.StackResources[i]
+			selected = &resource
+			break
+		}
+	}
+	if selected == nil {
+		return nil, nil, clierrors.NotFoundError("Resource", resourceName)
+	}
+
+	filteredStack := *stack
+	filteredStack.Spec = stack.Spec
+	filteredStack.Spec.StackResources = []openapi.StackResource{*selected}
+	if live == nil {
+		return &filteredStack, nil, nil
+	}
+
+	filteredLive := *live
+	if live.Resources != nil {
+		resources := make(map[string]openapi.StackResourceStatus, 1)
+		if status, ok := (*live.Resources)[resourceName]; ok {
+			resources[resourceName] = status
+		}
+		filteredLive.Resources = &resources
+	}
+	return &filteredStack, &filteredLive, nil
+}
+
+func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID, resourceName string, showConditions bool) error {
 	tick := time.NewTicker(3 * time.Second)
 	defer tick.Stop()
 
@@ -85,6 +130,10 @@ func watchStatus(ctx *cmdutil.CommandContext, cmd *cobra.Command, stackID string
 			if cmd.Context().Err() != nil {
 				return clierrors.ErrUserCanceled
 			}
+			return err
+		}
+		stack, live, err = filterStatusResource(stack, live, resourceName)
+		if err != nil {
 			return err
 		}
 

@@ -37,7 +37,7 @@ func newStackfileSchemaCmd() *cobra.Command {
 		Short: "Print the canonical Stackfile JSON Schema",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "json" {
-				return clierrors.ValidationError("stackfile schema only supports -o json")
+				return clierrors.ValidationError("get stackfile-schema only supports -o json")
 			}
 			if outputFile != "" {
 				if err := os.WriteFile(outputFile, stackfile.SchemaJSON, 0o644); err != nil {
@@ -70,7 +70,7 @@ func newStackfileExportCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if format != "yaml" && format != "json" {
-				return clierrors.ValidationError("stackfile export supports -o yaml or -o json")
+				return clierrors.ValidationError("export stackfile supports -o yaml or -o json")
 			}
 
 			stackID, err := resolveStackRef(ctx, cmd, args[0])

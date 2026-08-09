@@ -30,7 +30,7 @@ func newStackUseCmd() *cobra.Command {
 		Short:   "Select the current stack by name or ID",
 		Args:    cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			return selectStackContext(ctx, cmd, args[0], "stack use")
+			return selectStackContext(ctx, cmd, args[0], "use stack")
 		}),
 	}
 }
@@ -136,27 +136,28 @@ func newStackDeleteCmd() *cobra.Command {
 	var flagYes bool
 
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a stack by name",
+		Use:   "delete <stack>",
+		Short: "Delete a stack by name or ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			stack, err := ctx.Client.FindStackByName(cmd.Context(), args[0])
+			stackID, err := resolveStackRef(ctx, cmd, args[0])
 			if err != nil {
 				return err
 			}
-			if stack == nil {
-				return clierrors.NotFoundError("Stack", args[0])
+			stack, err := ctx.Client.GetStack(cmd.Context(), stackID)
+			if err != nil {
+				return err
 			}
 
 			if _, err := cmdutil.Confirm(ctx.Formatter, fmt.Sprintf("Delete stack %q?", stack.Name), flagYes); err != nil {
 				return err
 			}
 
-			if err := ctx.Client.DeleteStack(cmd.Context(), *stack.Id); err != nil {
+			if err := ctx.Client.DeleteStack(cmd.Context(), stackID); err != nil {
 				return err
 			}
 
-			if ctx.Config.CurrentStack == *stack.Id {
+			if ctx.Config.CurrentStack == stackID {
 				_ = ctx.Config.SetCurrentStack("")
 			}
 
@@ -164,7 +165,7 @@ func newStackDeleteCmd() *cobra.Command {
 				Status:   "deletion_initiated",
 				Resource: "stack",
 				Name:     stack.Name,
-				ID:       stack.GetId(),
+				ID:       stackID,
 			}, fmt.Sprintf("Stack %q deletion initiated.", stack.Name))
 		})),
 	}

@@ -14,49 +14,36 @@ import (
 	"time"
 
 	"github.com/Stackdome/stackdome-cli/internal/config"
-	"github.com/spf13/cobra"
 )
 
 const postgresAddonJSON = `{"id":"pg-1","name":"demo","spec":{"version":{"major":16},"instances":{"count":1},"storage":{"size":"10Gi"},"databases":[{"name":"demo"}]},"status":{"state":"Pending"}}`
 
-func TestRootRegistersPostgresShortcutWithSameHelpAndCreateFlags(t *testing.T) {
+func TestRootRegistersPostgresVerbFirstCommands(t *testing.T) {
 	root := newRootCmd()
-	shortcut, _, err := root.Find([]string{"postgres"})
-	if err != nil || shortcut == root || shortcut.CommandPath() != "stackdome postgres" {
-		t.Fatalf("find top-level postgres = %v, %v; want registered shortcut", shortcut, err)
+	create, _, err := root.Find([]string{"create", "postgres-addon", "demo"})
+	if err != nil || create.CommandPath() != "stackdome create postgres-addon" {
+		t.Fatalf("find create postgres-addon = %v, %v", create, err)
 	}
-	legacy, _, err := root.Find([]string{"addon", "postgres"})
-	if err != nil || legacy == root || legacy.CommandPath() != "stackdome addon postgres" {
-		t.Fatalf("find legacy postgres = %v, %v; want retained path", legacy, err)
-	}
-
-	for _, command := range []*cobra.Command{shortcut, legacy} {
-		create, _, err := command.Find([]string{"create"})
-		if err != nil {
-			t.Fatalf("find %s create: %v", command.CommandPath(), err)
-		}
-		for _, flag := range []string{"database", "superuser", "version", "instances", "storage", "wait", "timeout"} {
-			if create.Flags().Lookup(flag) == nil {
-				t.Errorf("%s create missing --%s", command.CommandPath(), flag)
-			}
+	for _, flag := range []string{"database", "superuser", "version", "instances", "storage", "wait", "timeout"} {
+		if create.Flags().Lookup(flag) == nil {
+			t.Errorf("%s missing --%s", create.CommandPath(), flag)
 		}
 	}
-
-	for _, args := range [][]string{{"postgres", "--help"}, {"addon", "postgres", "--help"}} {
-		var stdout, stderr bytes.Buffer
-		code := runWithWriters(args, &stdout, &stderr)
-		if code != 0 {
-			t.Fatalf("%v help exit = %d, stderr = %s", args, code, stderr.String())
-		}
-		for _, subcommand := range []string{"create", "list", "info", "delete", "credentials", "backup", "backups"} {
-			if !strings.Contains(stdout.String(), subcommand) {
-				t.Errorf("%v help omitted %q:\n%s", args, subcommand, stdout.String())
-			}
+	for _, path := range [][]string{
+		{"get", "postgres-addons"}, {"list", "postgres-addons"},
+		{"get", "postgres-addon", "demo"}, {"describe", "postgres-addon", "demo"},
+		{"get", "postgres-credentials", "demo", "app"},
+		{"get", "postgres-backups", "demo"}, {"list", "postgres-backups", "demo"},
+		{"backup", "postgres-addon", "demo"}, {"delete", "postgres-addon", "demo"},
+	} {
+		cmd, _, err := root.Find(path)
+		if err != nil || !cmd.Runnable() {
+			t.Errorf("path %v did not resolve to a runnable command: %v, %v", path, cmd, err)
 		}
 	}
 }
 
-func TestPostgresShortcutAndLegacyPathsRouteCreateAndListEquivalently(t *testing.T) {
+func TestPostgresGetAndListRouteEquivalently(t *testing.T) {
 	type request struct {
 		method string
 		path   string
@@ -84,47 +71,28 @@ func TestPostgresShortcutAndLegacyPathsRouteCreateAndListEquivalently(t *testing
 	defer server.Close()
 	configurePostgresCLI(t, server.URL)
 
-	paths := [][]string{{"postgres"}, {"addon", "postgres"}}
-	var createOutputs, listOutputs []string
-	for _, path := range paths {
-		createArgs := append(append([]string{}, path...), "create", "demo", "--database", "demo", "--version", "16", "--instances", "1", "--storage", "10Gi", "-o", "json")
-		stdout, stderr, code := runPostgresCLI(createArgs)
-		if code != 0 {
-			t.Fatalf("%v exit = %d, stderr = %s", createArgs, code, stderr)
-		}
-		createOutputs = append(createOutputs, stdout)
-
-		listArgs := append(append([]string{}, path...), "list", "-o", "json")
-		stdout, stderr, code = runPostgresCLI(listArgs)
+	var listOutputs []string
+	for _, listArgs := range [][]string{{"get", "postgres-addons", "-o", "json"}, {"list", "postgres-addons", "-o", "json"}} {
+		stdout, stderr, code := runPostgresCLI(listArgs)
 		if code != 0 {
 			t.Fatalf("%v exit = %d, stderr = %s", listArgs, code, stderr)
 		}
 		listOutputs = append(listOutputs, stdout)
 	}
-	if createOutputs[0] != createOutputs[1] {
-		t.Errorf("create outputs differ:\nshortcut: %s\nlegacy: %s", createOutputs[0], createOutputs[1])
-	}
 	if listOutputs[0] != listOutputs[1] {
-		t.Errorf("list outputs differ:\nshortcut: %s\nlegacy: %s", listOutputs[0], listOutputs[1])
+		t.Errorf("get/list outputs differ:\nget: %s\nlist: %s", listOutputs[0], listOutputs[1])
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requests) != 4 {
-		t.Fatalf("requests = %#v, want four", requests)
+	if len(requests) != 2 {
+		t.Fatalf("requests = %#v, want two", requests)
 	}
 	const endpoint = "/api/v1/organizations/org-1/projects/proj-1/addons/postgres"
 	for i, got := range requests {
-		wantMethod := http.MethodPost
-		if i%2 == 1 {
-			wantMethod = http.MethodGet
+		if got.method != http.MethodGet || got.path != endpoint {
+			t.Errorf("request %d = %s %s, want GET %s", i, got.method, got.path, endpoint)
 		}
-		if got.method != wantMethod || got.path != endpoint {
-			t.Errorf("request %d = %s %s, want %s %s", i, got.method, got.path, wantMethod, endpoint)
-		}
-	}
-	if requests[0].body != requests[2].body {
-		t.Errorf("create request bodies differ:\nshortcut: %s\nlegacy: %s", requests[0].body, requests[2].body)
 	}
 }
 
@@ -134,8 +102,8 @@ func TestPostgresCreateWaitSucceedsForHealthyTerminalStatesOnBothPaths(t *testin
 		path  []string
 		state string
 	}{
-		{name: "shortcut ready", path: []string{"postgres"}, state: "Ready"},
-		{name: "legacy running", path: []string{"addon", "postgres"}, state: "Running"},
+		{name: "ready", path: []string{"create", "postgres-addon"}, state: "Ready"},
+		{name: "running", path: []string{"create", "postgres-addon"}, state: "Running"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,7 +115,7 @@ func TestPostgresCreateWaitSucceedsForHealthyTerminalStatesOnBothPaths(t *testin
 			defer server.Close()
 			configurePostgresCLI(t, server.URL)
 
-			args := append(append([]string{}, tt.path...), "create", "demo", "--wait", "--timeout", "1s", "-o", "json")
+			args := append(append([]string{}, tt.path...), "demo", "--wait", "--timeout", "1s", "-o", "json")
 			stdout, stderr, code := runPostgresCLI(args)
 			if code != 0 {
 				t.Fatalf("exit = %d, stderr = %s", code, stderr)
@@ -179,7 +147,7 @@ func TestPostgresCreateWaitFailsForTerminalFailureStates(t *testing.T) {
 			defer server.Close()
 			configurePostgresCLI(t, server.URL)
 
-			stdout, stderr, code := runPostgresCLI([]string{"postgres", "create", "demo", "--wait", "--timeout", "1s", "-o", "json"})
+			stdout, stderr, code := runPostgresCLI([]string{"create", "postgres-addon", "demo", "--wait", "--timeout", "1s", "-o", "json"})
 			if code == 0 {
 				t.Fatal("exit = 0, want failure")
 			}
@@ -201,7 +169,7 @@ func TestPostgresCreateWaitTimeoutIsBounded(t *testing.T) {
 	configurePostgresCLI(t, server.URL)
 
 	started := time.Now()
-	stdout, stderr, code := runPostgresCLI([]string{"postgres", "create", "demo", "--wait", "--timeout", "20ms", "-o", "json"})
+	stdout, stderr, code := runPostgresCLI([]string{"create", "postgres-addon", "demo", "--wait", "--timeout", "20ms", "-o", "json"})
 	if code == 0 {
 		t.Fatal("exit = 0, want timeout")
 	}

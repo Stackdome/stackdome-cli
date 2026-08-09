@@ -55,7 +55,7 @@ func newConfigSetStackCmd() *cobra.Command {
 		Short: "Set the current stack context (name or ID)",
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			return selectStackContext(ctx, cmd, args[0], "config set-stack")
+			return selectStackContext(ctx, cmd, args[0], "use stack")
 		}),
 	}
 }
@@ -74,7 +74,7 @@ func newConfigSetContextCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if ctx.Config.ContextFromEnv() {
-				return clierrors.ValidationError("config set-context cannot override STACKDOME_URL or STACKDOME_TOKEN; unset them or change those environment variables")
+				return clierrors.ValidationError("use context cannot override STACKDOME_URL or STACKDOME_TOKEN; unset them or change those environment variables")
 			}
 			newURL := args[0]
 			if newURL == "" {

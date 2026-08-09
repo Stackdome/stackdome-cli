@@ -302,7 +302,7 @@ func TestRequireStackErrorExplainsHowToSelectExistingStack(t *testing.T) {
 		t.Fatal("RequireStack error = nil, want missing-stack guidance")
 	}
 	message := err.Error()
-	for _, want := range []string{"stackdome stack list", "stackdome stack use <name>", "--stack <name>"} {
+	for _, want := range []string{"stackdome get stacks", "stackdome use stack <name>", "--stack <name>"} {
 		if !strings.Contains(message, want) {
 			t.Errorf("RequireStack error = %q, want %q", message, want)
 		}
@@ -322,10 +322,10 @@ func TestRequireStackWithEnvironmentTokenDoesNotRecommendPersistentSelection(t *
 		t.Fatal("RequireStack error = nil, want missing-stack guidance")
 	}
 	message := err.Error()
-	if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome stack list") {
+	if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome get stacks") {
 		t.Fatalf("RequireStack error = %q, want list and --stack guidance", message)
 	}
-	if strings.Contains(message, "stack use") {
+	if strings.Contains(message, "use stack") {
 		t.Fatalf("RequireStack error = %q, must not recommend a selection that an environment-token process cannot persist", message)
 	}
 }
@@ -356,10 +356,10 @@ func TestRequireStackWithEnvironmentSelectionOverrideDoesNotRecommendPersistentS
 				t.Fatal("RequireStack error = nil, want missing-stack guidance")
 			}
 			message := err.Error()
-			if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome stack list") {
+			if !strings.Contains(message, "--stack <name>") || !strings.Contains(message, "stackdome get stacks") {
 				t.Fatalf("RequireStack error = %q, want list and --stack guidance", message)
 			}
-			if strings.Contains(message, "stack use") {
+			if strings.Contains(message, "use stack") {
 				t.Fatalf("RequireStack error = %q, must not recommend persistent selection under an environment override", message)
 			}
 		})

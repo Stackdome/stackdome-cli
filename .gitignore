@@ -9,3 +9,4 @@ bin/
 /.agents/plans/
 HANDOVER.md
 .vscode/
+.worktrees/

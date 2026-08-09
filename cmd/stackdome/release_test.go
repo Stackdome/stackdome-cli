@@ -657,6 +657,31 @@ func rollbackCommandContext(serverURL string) (*cmdutil.CommandContext, *bytes.B
 	return ctx, stdout
 }
 
+func TestCreateReleaseWaitObservesTheCreatedRelease(t *testing.T) {
+	ts := rollbackObservationServer(t,
+		`{"id":"`+rollbackTestStackID+`","name":"demo","spec":{},"converged_release":{"id":"release-rollback"}}`,
+		`{"id":"release-rollback","stack_id":"`+rollbackTestStackID+`","state":"Released","live_status":{"health":"ok"}}`,
+	)
+	defer ts.Close()
+
+	ctx, stdout := rollbackCommandContext(ts.URL)
+	cmd := newReleaseCreateCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"--wait"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("create release --wait: %v", err)
+	}
+	var got rollbackResult
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\nstdout: %s", err, stdout.String())
+	}
+	if got.Release == nil || got.LiveStatus == nil {
+		t.Errorf("wait result omitted release or live status: %#v", got)
+	}
+}
+
 func rollbackObservationServer(t *testing.T, stackResponse, liveResponse string) *httptest.Server {
 	t.Helper()
 	var releaseReads int

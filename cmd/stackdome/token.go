@@ -16,7 +16,7 @@ func newTokenCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
 		Short: "Manage API tokens",
-		Long:  "Manage personal access tokens for headless and CI access.\n\nUse `stackdome token scopes` to discover valid scopes.",
+		Long:  "Manage personal access tokens for headless and CI access.\n\nUse `stackdome get token-scopes` to discover valid scopes.",
 	}
 
 	cmd.AddCommand(newTokenCreateCmd())
@@ -37,12 +37,12 @@ func newTokenCreateCmd() *cobra.Command {
 		Use:   "create <name>",
 		Short: "Create an API token",
 		Long:  "Create an API token. The token value is shown once and cannot be retrieved again.",
-		Example: "  stackdome token create ci --scope 'stacks:*' --scope secrets:read --expires 720h\n" +
-			"  stackdome token create agent --scope '*:*' -o json",
+		Example: "  stackdome create token ci --scope 'stacks:*' --scope secrets:read --expires 720h\n" +
+			"  stackdome create token agent --scope '*:*' -o json",
 		Args: cobra.ExactArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
 			if len(flagScopes) == 0 {
-				return clierrors.ValidationError("At least one --scope is required (see `stackdome token scopes`)")
+				return clierrors.ValidationError("At least one --scope is required (see `stackdome get token-scopes`)")
 			}
 			expiresAt, err := parseExpiry(flagExpires, time.Now())
 			if err != nil {

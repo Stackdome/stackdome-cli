@@ -527,7 +527,7 @@ func TestBuildLogsUnavailableForPendingBuildDoesNotClaimPruning(t *testing.T) {
 // runtime logs; prose from the callback would corrupt the document.
 func TestBuildLogsJSONServerErrorIsSingleRootDocument(t *testing.T) {
 	if os.Getenv("STACKDOME_TEST_BUILD_LOG_ERROR_HELPER") == "1" {
-		os.Exit(runWithWriters([]string{"build", "logs", "build-1", "--stack", "app", "-o", "json"}, os.Stdout, os.Stderr))
+		os.Exit(runWithWriters([]string{"logs", "build", "build-1", "--stack", "app", "-o", "json"}, os.Stdout, os.Stderr))
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
