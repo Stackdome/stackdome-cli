@@ -1,12 +1,12 @@
 # Install the Stackdome CLI
 
-The installers download the latest GitHub release for the current platform and
-verify its SHA-256 checksum before installing it.
+The installer downloads the latest GitHub release for the current platform and
+verifies its SHA-256 checksum before installing it.
 
 ## macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.sh | sh
+curl -fsSL https://get.stackdome.com/cli.sh | sh
 ```
 
 For agents and CI, download first so a network failure cannot be hidden by
@@ -15,7 +15,7 @@ pipeline exit-status behavior:
 ```sh
 installer_file=$(mktemp)
 trap 'rm -f "$installer_file"' EXIT
-curl -fsSL https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.sh -o "$installer_file"
+curl -fsSL https://get.stackdome.com/cli.sh -o "$installer_file"
 sh "$installer_file"
 ```
 
@@ -25,32 +25,13 @@ when that directory is writable, otherwise it uses `$HOME/.local/bin`.
 To install a specific version or directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.sh \
-  | STACKDOME_VERSION=v0.0.1-alpha STACKDOME_INSTALL_DIR="$HOME/.local/bin" sh
+installer_file=$(mktemp)
+trap 'rm -f "$installer_file"' EXIT
+curl -fsSL https://get.stackdome.com/cli.sh -o "$installer_file"
+sh "$installer_file" \
+  --version v0.0.2-alpha \
+  --install-dir "$HOME/.local/bin"
 ```
 
-## Windows PowerShell
-
-```powershell
-irm https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.ps1 | iex
-```
-
-For agents and CI, fetch the script before evaluating it so download errors are
-terminal:
-
-```powershell
-$installer = Invoke-RestMethod -ErrorAction Stop https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.ps1
-& ([ScriptBlock]::Create([string]$installer))
-```
-
-The installer supports AMD64 and ARM64. By default it installs to
-`%LOCALAPPDATA%\Programs\Stackdome\bin` and adds that directory to the user
-`PATH`.
-
-To install a specific version or directory:
-
-```powershell
-$env:STACKDOME_VERSION = 'v0.0.1-alpha'
-$env:STACKDOME_INSTALL_DIR = "$env:LOCALAPPDATA\Programs\Stackdome\bin"
-irm https://raw.githubusercontent.com/Stackdome/stackdome-cli/main/install.ps1 | iex
-```
+`STACKDOME_VERSION` and `STACKDOME_INSTALL_DIR` provide the same settings for
+automation. Explicit flags take precedence over environment variables.

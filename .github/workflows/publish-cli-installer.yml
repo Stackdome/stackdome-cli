@@ -1,0 +1,119 @@
+name: Publish CLI installer
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag whose installer should be published
+        required: true
+        type: string
+    secrets:
+      CLOUDFLARE_R2_ACCESS_KEY_ID:
+        required: true
+      CLOUDFLARE_R2_SECRET_ACCESS_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish or repair
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cli-installer-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish get.stackdome.com/cli.sh
+    runs-on: ubuntu-latest
+    environment: installer-production
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ACCOUNT_ID: ${{ vars.CLOUDFLARE_R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate publishing configuration
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          test -n "${R2_ACCOUNT_ID}" || {
+            echo "Repository variable CLOUDFLARE_R2_ACCOUNT_ID is required" >&2
+            exit 1
+          }
+          test -n "${R2_BUCKET}" || {
+            echo "Repository variable CLOUDFLARE_R2_BUCKET is required" >&2
+            exit 1
+          }
+
+      - name: Check out release tag
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Validate installer syntax
+        run: sh -n install.sh
+
+      - name: Publish immutable installer
+        env:
+          R2_ENDPOINT: https://${{ vars.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          published_installer="$(mktemp)"
+          head_error="$(mktemp)"
+          trap 'rm -f "${published_installer}" "${head_error}"' EXIT
+
+          if aws s3api head-object \
+            --bucket "${R2_BUCKET}" \
+            --key "cli/${RELEASE_TAG}/cli.sh" \
+            --endpoint-url "${R2_ENDPOINT}" >/dev/null 2>"${head_error}"; then
+            aws s3 cp "s3://${R2_BUCKET}/cli/${RELEASE_TAG}/cli.sh" "${published_installer}" \
+              --endpoint-url "${R2_ENDPOINT}"
+            if ! cmp install.sh "${published_installer}"; then
+              echo "Refusing to overwrite immutable installer cli/${RELEASE_TAG}/cli.sh" >&2
+              exit 1
+            fi
+          elif grep -Eq '\(404\)|Not Found|NoSuchKey' "${head_error}"; then
+            aws s3 cp install.sh "s3://${R2_BUCKET}/cli/${RELEASE_TAG}/cli.sh" \
+              --endpoint-url "${R2_ENDPOINT}" \
+              --content-type "text/x-shellscript; charset=utf-8" \
+              --cache-control "public,max-age=31536000,immutable"
+          else
+            cat "${head_error}" >&2
+            exit 1
+          fi
+
+          aws s3 cp "s3://${R2_BUCKET}/cli/${RELEASE_TAG}/cli.sh" "${published_installer}" \
+            --endpoint-url "${R2_ENDPOINT}"
+          cmp install.sh "${published_installer}"
+          sh -n "${published_installer}"
+
+      - name: Publish stable alias last
+        env:
+          R2_ENDPOINT: https://${{ vars.CLOUDFLARE_R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          aws s3 cp install.sh "s3://${R2_BUCKET}/cli.sh" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "text/x-shellscript; charset=utf-8" \
+            --cache-control "no-store"
+
+      - name: Verify public installer
+        run: |
+          public_installer="$(mktemp)"
+          response_headers="$(mktemp)"
+          trap 'rm -f "${public_installer}" "${response_headers}"' EXIT
+          curl --retry 5 --retry-all-errors -fsSL \
+            -D "${response_headers}" \
+            -o "${public_installer}" \
+            https://get.stackdome.com/cli.sh
+          cmp install.sh "${public_installer}"
+          sh -n "${public_installer}"
+          grep -qi '^content-type: text/x-shellscript' "${response_headers}"
+          grep -qi '^cache-control: no-store' "${response_headers}"
