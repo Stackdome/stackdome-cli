@@ -85,10 +85,6 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -113,18 +109,11 @@ jobs:
           build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           mkdir -p package dist
           binary="stackdome"
-          if [ "${GOOS}" = "windows" ]; then
-            binary="stackdome.exe"
-          fi
           go build -trimpath \
             -ldflags "-s -w -X main.Version=${version} -X main.GitCommit=${commit} -X main.BuildDate=${build_date}" \
             -o "package/${binary}" ./cmd/stackdome
           cp LICENSE package/LICENSE
-          if [ "${GOOS}" = "windows" ]; then
-            (cd package && zip -q "../dist/stackdome_${version}_${GOOS}_${GOARCH}.zip" "${binary}" LICENSE)
-          else
-            tar -C package -czf "dist/stackdome_${version}_${GOOS}_${GOARCH}.tar.gz" "${binary}" LICENSE
-          fi
+          tar -C package -czf "dist/stackdome_${version}_${GOOS}_${GOARCH}.tar.gz" "${binary}" LICENSE
 
       - name: Verify release metadata
         if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
@@ -169,13 +158,46 @@ jobs:
 
       - name: Generate checksum manifest
         working-directory: dist
-        run: sha256sum *.tar.gz *.zip > checksums.txt
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          expected_archives=(
+            "stackdome_${RELEASE_TAG}_darwin_amd64.tar.gz"
+            "stackdome_${RELEASE_TAG}_darwin_arm64.tar.gz"
+            "stackdome_${RELEASE_TAG}_linux_amd64.tar.gz"
+            "stackdome_${RELEASE_TAG}_linux_arm64.tar.gz"
+          )
+          for archive in "${expected_archives[@]}"; do
+            test -f "${archive}" || {
+              echo "Missing release archive: ${archive}" >&2
+              exit 1
+            }
+          done
+          archive_count="$(find . -maxdepth 1 -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
+          if [ "${archive_count}" != "4" ]; then
+            echo "Expected exactly 4 release archives, found ${archive_count}" >&2
+            exit 1
+          fi
+          sha256sum "${expected_archives[@]}" > checksums.txt
+          checksum_count="$(wc -l < checksums.txt | tr -d ' ')"
+          if [ "${checksum_count}" != "4" ]; then
+            echo "Expected exactly 4 checksums, found ${checksum_count}" >&2
+            exit 1
+          fi
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          expected_assets=(
+            "stackdome_${RELEASE_TAG}_darwin_amd64.tar.gz"
+            "stackdome_${RELEASE_TAG}_darwin_arm64.tar.gz"
+            "stackdome_${RELEASE_TAG}_linux_amd64.tar.gz"
+            "stackdome_${RELEASE_TAG}_linux_arm64.tar.gz"
+            "checksums.txt"
+          )
+
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             release_is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)"
           else
@@ -183,9 +205,44 @@ jobs:
             release_is_draft=true
           fi
 
-          gh release upload "${RELEASE_TAG}" dist/*.tar.gz dist/*.zip --clobber
+          while IFS= read -r asset; do
+            is_expected=false
+            for expected_asset in "${expected_assets[@]}"; do
+              if [[ "${asset}" == "${expected_asset}" ]]; then
+                is_expected=true
+                break
+              fi
+            done
+            if [[ "${is_expected}" == "false" ]]; then
+              echo "Removing obsolete release asset: ${asset}"
+              gh release delete-asset "${RELEASE_TAG}" "${asset}" --yes
+            fi
+          done < <(gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name')
+
+          gh release upload "${RELEASE_TAG}" dist/*.tar.gz --clobber
           gh release upload "${RELEASE_TAG}" dist/checksums.txt --clobber
+
+          mapfile -t actual_assets < <(
+            gh release view "${RELEASE_TAG}" --json assets --jq '.assets[].name' | sort
+          )
+          mapfile -t sorted_expected_assets < <(printf '%s\n' "${expected_assets[@]}" | sort)
+          if [[ "${actual_assets[*]}" != "${sorted_expected_assets[*]}" ]]; then
+            echo "Release assets do not match the Linux/macOS publication contract" >&2
+            printf 'Expected: %s\n' "${sorted_expected_assets[*]}" >&2
+            printf 'Actual:   %s\n' "${actual_assets[*]}" >&2
+            exit 1
+          fi
 
           if [[ "${release_is_draft}" == "true" ]]; then
             gh release edit "${RELEASE_TAG}" --draft=false
           fi
+
+  publish-installer:
+    name: Publish CLI installer
+    needs:
+      - prepare
+      - publish
+    uses: ./.github/workflows/publish-cli-installer.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit

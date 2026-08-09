@@ -6,7 +6,26 @@ repository=${STACKDOME_REPOSITORY:-Stackdome/stackdome-cli}
 release_base_url=${STACKDOME_RELEASE_BASE_URL:-https://github.com/${repository}/releases/download}
 api_base_url=${STACKDOME_API_BASE_URL:-https://api.github.com}
 version=${STACKDOME_VERSION:-}
+install_dir=${STACKDOME_INSTALL_DIR:-}
 tmp_dir=
+staged_binary=
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh [options]
+
+Install the Stackdome CLI on macOS or Linux.
+
+Options:
+  --version <version>        Install a specific release (for example, v0.0.2-alpha)
+  --install-dir <directory>  Install stackdome into this directory
+  -h, --help                 Show this help
+
+Environment:
+  STACKDOME_VERSION          Default release version
+  STACKDOME_INSTALL_DIR      Default installation directory
+EOF
+}
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -14,6 +33,9 @@ fail() {
 }
 
 cleanup() {
+  if [ -n "$staged_binary" ] && [ -e "$staged_binary" ]; then
+    rm -f "$staged_binary"
+  fi
   if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
     rm -rf "$tmp_dir"
   fi
@@ -32,6 +54,31 @@ download() {
   fi
 }
 
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--version requires a value"
+      version=$2
+      shift 2
+      ;;
+    --install-dir)
+      [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--install-dir requires a value"
+      install_dir=$2
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      [ "$#" -eq 0 ] || fail "unexpected argument: $1"
+      ;;
+    -*) fail "unknown option: $1" ;;
+    *) fail "unexpected argument: $1" ;;
+  esac
+done
+
 case "$(uname -s)" in
   Darwin) os=darwin ;;
   Linux) os=linux ;;
@@ -44,8 +91,8 @@ case "$(uname -m)" in
   *) fail "unsupported architecture: $(uname -m) (supported: amd64 and arm64)" ;;
 esac
 
-if [ -n "${STACKDOME_INSTALL_DIR:-}" ]; then
-  install_dir=$STACKDOME_INSTALL_DIR
+if [ -n "$install_dir" ]; then
+  :
 elif [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
   install_dir=/usr/local/bin
 else
@@ -95,9 +142,12 @@ printf 'Verified checksum for %s.\n' "$asset"
 
 tar -xzf "$archive_path" -C "$tmp_dir" stackdome || fail "could not extract stackdome from $asset"
 mkdir -p "$install_dir" || fail "could not create install directory: $install_dir"
-install -m 0755 "$tmp_dir/stackdome" "$install_dir/stackdome" || fail "could not install stackdome to $install_dir"
+staged_binary=$(mktemp "$install_dir/.stackdome.install.XXXXXX") || fail "could not stage stackdome in $install_dir"
+install -m 0755 "$tmp_dir/stackdome" "$staged_binary" || fail "could not stage stackdome in $install_dir"
+mv -f "$staged_binary" "$install_dir/stackdome" || fail "could not install stackdome to $install_dir"
+staged_binary=
 
-printf 'Installed Stackdome CLI to %s/stackdome\n' "$install_dir"
+printf 'Installed Stackdome CLI %s to %s/stackdome\n' "$version" "$install_dir"
 case ":${PATH:-}:" in
   *":$install_dir:"*) ;;
   *) printf 'warning: %s is not on your PATH; add it before running stackdome\n' "$install_dir" >&2 ;;
