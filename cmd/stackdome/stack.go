@@ -1,14 +1,50 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	"github.com/Stackdome/stackdome-cli/internal/output"
+	openapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
 )
+
+type stackListItem struct {
+	openapi.Stack
+	Current bool `json:"current"`
+}
+
+func (item stackListItem) MarshalJSON() ([]byte, error) {
+	stackJSON, err := json.Marshal(item.Stack)
+	if err != nil {
+		return nil, err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(stackJSON, &fields); err != nil {
+		return nil, err
+	}
+	currentJSON, err := json.Marshal(item.Current)
+	if err != nil {
+		return nil, err
+	}
+	fields["current"] = currentJSON
+	return json.Marshal(fields)
+}
+
+func currentStackMatches(stack openapi.Stack, current string) bool {
+	return current != "" && (stack.GetId() == current || stack.Name == current)
+}
+
+func decorateStackList(stacks []openapi.Stack, current string) []stackListItem {
+	items := make([]stackListItem, len(stacks))
+	for i := range stacks {
+		items[i] = stackListItem{Stack: stacks[i], Current: currentStackMatches(stacks[i], current)}
+	}
+	return items
+}
 
 func newStackCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -71,7 +107,7 @@ func newStackListCmd() *cobra.Command {
 			}
 
 			if !ctx.Formatter.IsTable() {
-				return ctx.Formatter.PrintStructured(stacks)
+				return ctx.Formatter.PrintStructured(decorateStackList(stacks, ctx.Config.CurrentStack))
 			}
 
 			if len(stacks) == 0 {
@@ -79,11 +115,11 @@ func newStackListCmd() *cobra.Command {
 				return nil
 			}
 
-			tbl := ctx.Formatter.NewTable("", "NAME", "ID", "STATE")
+			tbl := ctx.Formatter.NewTable("CURRENT", "NAME", "ID", "STATE")
 
 			for _, s := range stacks {
 				marker := " "
-				if s.Id != nil && *s.Id == ctx.Config.CurrentStack {
+				if currentStackMatches(s, ctx.Config.CurrentStack) {
 					marker = "*"
 				}
 				state := "Unknown"
