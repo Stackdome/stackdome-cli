@@ -18,10 +18,11 @@ type logEvent struct {
 
 func newLogsCmd() *cobra.Command {
 	var (
-		flagFollow bool
-		flagTail   int32
-		flagSince  string
-		flagStack  string
+		flagFollow   bool
+		flagTail     int32
+		flagSince    string
+		flagStack    string
+		flagResource string
 	)
 
 	cmd := &cobra.Command{
@@ -29,6 +30,9 @@ func newLogsCmd() *cobra.Command {
 		Short: "Stream logs from a stack or resource",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
+			if flagResource != "" && len(args) > 0 {
+				return clierrors.ValidationError("pass a runtime resource either as the positional argument or with --resource, not both")
+			}
 			if err := output.ValidateStreamingFormat(ctx.Formatter.Format); err != nil {
 				return err
 			}
@@ -37,7 +41,7 @@ func newLogsCmd() *cobra.Command {
 				return err
 			}
 
-			resourceName := ""
+			resourceName := flagResource
 			if len(args) > 0 {
 				resourceName = args[0]
 			}
@@ -77,6 +81,13 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&flagTail, "tail", 100, "Number of lines to show")
 	cmd.Flags().StringVar(&flagSince, "since", "", "Show logs since duration (e.g. 5m, 1h)")
 	cmd.Flags().StringVarP(&flagStack, "stack", "s", "", "Stack name (overrides current context)")
+	cmd.Flags().StringVarP(&flagResource, "resource", "r", "", "Filter to one runtime resource (use for a resource named build)")
+	cmd.AddCommand(documentCommand(newBuildLogsCmd(), operationDocs(
+		"build <build-id>",
+		"Stream logs for one build",
+		"Read logs for one build in the selected or specified stack. Pass --follow to continue streaming output.",
+		"stackdome logs build <build-id> --follow",
+	)))
 
 	return cmd
 }

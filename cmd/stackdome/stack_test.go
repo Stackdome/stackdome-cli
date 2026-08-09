@@ -147,7 +147,7 @@ func TestStackUseWithEnvironmentTokenRejectsBeforeScopeDiscovery(t *testing.T) {
 	t.Setenv("STACKDOME_TOKEN", "sdm_ephemeral")
 
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"stack", "use", "n8n", "-o", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"use", "stack", "n8n", "-o", "json"}, &stdout, &stderr)
 	if code != 4 {
 		t.Fatalf("exit code = %d, want validation exit 4; stderr: %s", code, stderr.String())
 	}
@@ -192,7 +192,7 @@ func TestStackUseRejectsEnvironmentSelectionOverridesWithoutChangingFileContext(
 			t.Setenv(tt.key, tt.value(ts.URL))
 
 			var stdout, stderr bytes.Buffer
-			code := runWithWriters([]string{"stack", "use", "n8n", "-o", "json"}, &stdout, &stderr)
+			code := runWithWriters([]string{"use", "stack", "n8n", "-o", "json"}, &stdout, &stderr)
 			if code != 4 {
 				t.Fatalf("exit code = %d, want validation exit 4; stderr: %s", code, stderr.String())
 			}
@@ -289,6 +289,8 @@ func TestStackDeleteJSONPrintsStructuredResult(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/organizations/org-1/projects/default/stacks":
 			_, _ = w.Write([]byte(`{"items":[{"id":"stack-1","name":"app","spec":{}}],"total":1}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/organizations/org-1/projects/default/stacks/stack-1":
+			_, _ = w.Write([]byte(`{"id":"stack-1","name":"app","spec":{}}`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/organizations/org-1/projects/default/stacks/stack-1":
 			deleted = true
 			w.WriteHeader(http.StatusNoContent)
@@ -312,7 +314,7 @@ func TestStackDeleteJSONPrintsStructuredResult(t *testing.T) {
 	cmd := newStackDeleteCmd()
 	cmd.SetContext(context.Background())
 	cmdutil.SetContext(cmd, ctx)
-	cmd.SetArgs([]string{"app", "--yes"})
+	cmd.SetArgs([]string{"stack-1", "--yes"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("stack delete: %v", err)

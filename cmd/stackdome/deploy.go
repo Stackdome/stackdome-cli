@@ -32,37 +32,25 @@ func newDeployCmd() *cobra.Command {
 		Long: `Deploy a stack from a stackfile or JSON.
 
 With -o json|yaml stdout carries {"stack": ..., "release": ...} — the release id
-is the one to follow with ` + "`stackdome release events <id> -f`" + `. With --wait
-the release object is the final one.`,
+is the one to follow with ` + "`stackdome get release-events <id> -f`" + `. Deploy
+first saves the stack definition, then creates a release. Use ` + "`stackdome apply`" + `
+to save without releasing. With --wait the release object is the final one.`,
+		Example: "  stackdome deploy -f stackfile.yaml\n  stackdome deploy -f stackfile.yaml --wait --timeout 15m\n  stackdome deploy -f stackfile.yaml -o json",
+		Args:    cobra.NoArgs,
 		RunE: cmdutil.WithContext(cmdutil.RequireAuth(func(ctx *cmdutil.CommandContext, cmd *cobra.Command, args []string) error {
-			stack, err := loadStack(flagFile, flagName)
-			if err != nil {
-				return err
-			}
-
-			// Names in `secrets:`/`addons:` become IDs before the document is
-			// sent — the server only speaks IDs.
-			if err := stackfile.ResolveStack(cmd.Context(), stack, &apiResolver{c: ctx.Client}); err != nil {
-				return err
-			}
-
 			if ctx.Formatter.IsTable() {
-				fmt.Fprintf(os.Stderr, "Applying stack %q...\n", stack.Name)
+				fmt.Fprintln(os.Stderr, "Applying stack definition...")
 			}
-			result, err := ctx.Client.ApplyStack(cmd.Context(), *stack)
+			result, err := applyStackDefinition(ctx, cmd, applyOptions{File: flagFile, Name: flagName})
 			if err != nil {
-				return err
-			}
-
-			if err := ctx.Config.SetCurrentStack(*result.Id); err != nil {
 				return err
 			}
 
 			// Apply only stores the document; the release is what rolls it
 			// out. Its id is the one --wait follows — never a pre-existing one.
-			release, err := ctx.Client.CreateRelease(cmd.Context(), *result.Id)
+			release, err := submitRelease(ctx, cmd, result.GetId())
 			if err != nil {
-				return err
+				return clierrors.Wrap(err, "Stack was saved, but the release was not created")
 			}
 
 			if !flagWait {
@@ -70,7 +58,7 @@ the release object is the final one.`,
 					return ctx.Formatter.PrintStructured(deployResult{Stack: result, Release: release})
 				}
 				fmt.Fprintf(os.Stderr, "\nRelease #%d for stack %q submitted. Track progress with:\n", release.GetSequence(), result.Name)
-				fmt.Fprintf(os.Stderr, "  stackdome release events %s -f\n", release.GetId())
+				fmt.Fprintf(os.Stderr, "  stackdome get release-events %s -f\n", release.GetId())
 				fmt.Fprintf(os.Stderr, "  stackdome status --watch  # live updates\n")
 				fmt.Fprintf(os.Stderr, "  stackdome logs            # stream logs\n")
 				return nil
@@ -113,7 +101,7 @@ func (r *apiResolver) ResolveSecretByName(ctx context.Context, name string) (str
 		return "", err
 	}
 	if secret == nil || secret.Id == nil {
-		return "", clierrors.Newf("Secret %q not found. Run `stackdome secret list` to see available secrets.", name)
+		return "", clierrors.Newf("Secret %q not found. Run `stackdome get secrets` to see available secrets.", name)
 	}
 	return *secret.Id, nil
 }

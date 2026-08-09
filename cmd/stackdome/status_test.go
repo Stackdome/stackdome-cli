@@ -138,6 +138,59 @@ func TestStatusYAMLIncludesStackAndLiveStatus(t *testing.T) {
 	}
 }
 
+func TestStatusResourceFiltersStackAndLiveStatus(t *testing.T) {
+	const stackID = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID:
+			_, _ = w.Write([]byte(`{"id":"` + stackID + `","name":"app","spec":{"stack_resources":[{"name":"web"},{"name":"worker"}]},"converged_release":{"id":"rel-7"}}`))
+		case "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/releases/rel-7":
+			_, _ = w.Write([]byte(`{"id":"rel-7","live_status":{"health":"ok","resources":{"web":{},"worker":{}}}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL: ts.URL, AccessToken: "sdm_test", OrganizationID: "org-1",
+		ProjectName: "proj-1", CurrentStack: stackID,
+	}, output.FormatJSON, slog.LevelError)
+	var stdout bytes.Buffer
+	ctx.Formatter.Writer = &stdout
+	cmd := newStatusCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"web"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("status web: %v", err)
+	}
+
+	var got struct {
+		Stack struct {
+			Spec struct {
+				Resources []struct {
+					Name string `json:"name"`
+				} `json:"stack_resources"`
+			} `json:"spec"`
+		} `json:"stack"`
+		LiveStatus struct {
+			Resources map[string]json.RawMessage `json:"resources"`
+		} `json:"live_status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("status output is not JSON: %v\nstdout: %s", err, stdout.String())
+	}
+	if len(got.Stack.Spec.Resources) != 1 || got.Stack.Spec.Resources[0].Name != "web" {
+		t.Errorf("stack resources = %#v, want only web", got.Stack.Spec.Resources)
+	}
+	if len(got.LiveStatus.Resources) != 1 || got.LiveStatus.Resources["web"] == nil {
+		t.Errorf("live resources = %#v, want only web", got.LiveStatus.Resources)
+	}
+}
+
 // A watched status is a stream, so JSON mode must use one compact result per
 // line and surface an interruption as cancellation instead of a false success.
 func TestWatchStatusJSONWritesNDJSONAndReturnsCancellation(t *testing.T) {
@@ -169,7 +222,7 @@ func TestWatchStatusJSONWritesNDJSONAndReturnsCancellation(t *testing.T) {
 	ctx.Formatter.Writer = &stdout
 	cmd := newStatusCmd()
 	cmd.SetContext(commandContext)
-	err := watchStatus(ctx, cmd, "stack-1", false)
+	err := watchStatus(ctx, cmd, "stack-1", "", false)
 	if err != clierrors.ErrUserCanceled {
 		t.Fatalf("watchStatus error = %v, want cancellation", err)
 	}

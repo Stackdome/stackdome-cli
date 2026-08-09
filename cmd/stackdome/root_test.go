@@ -18,13 +18,13 @@ import (
 // Stackfile discovery unreachable even if their implementation still builds.
 func TestRootRegistersAgentLaunchCommands(t *testing.T) {
 	root := newRootCmd()
-	for _, name := range []string{"doctor", "stackfile", "api"} {
-		command, _, err := root.Find([]string{name})
+	for _, path := range [][]string{{"doctor"}, {"get", "stackfile-schema"}, {"api"}} {
+		command, _, err := root.Find(path)
 		if err != nil {
-			t.Fatalf("find %s: %v", name, err)
+			t.Fatalf("find %v: %v", path, err)
 		}
-		if command == root || command.Name() != name {
-			t.Errorf("root command %q is not registered", name)
+		if command == root || !command.Runnable() {
+			t.Errorf("agent command %v is not registered", path)
 		}
 	}
 }
@@ -101,8 +101,8 @@ func TestRunWithWritersShowsLeafHelpWhenRequiredArgsAreMissing(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "table", args: []string{"secret", "create"}},
-		{name: "yaml", args: []string{"secret", "create", "--output", "yaml"}},
+		{name: "table", args: []string{"create", "secret"}},
+		{name: "yaml", args: []string{"create", "secret", "--output", "yaml"}},
 	}
 
 	for _, tt := range tests {
@@ -117,7 +117,7 @@ func TestRunWithWritersShowsLeafHelpWhenRequiredArgsAreMissing(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			const usage = "Usage:\n  stackdome secret create <name> [flags]"
+			const usage = "Usage:\n  stackdome create secret <name> [flags]"
 			if !strings.Contains(stderr.String(), usage) {
 				t.Errorf("stderr does not contain command help usage %q:\n%s", usage, stderr.String())
 			}
@@ -131,7 +131,7 @@ func TestRunWithWritersShowsLeafHelpWhenRequiredArgsAreMissing(t *testing.T) {
 func TestRunWithWritersKeepsMissingArgsErrorMachineReadableInJSONMode(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
-	code := runWithWriters([]string{"secret", "create", "--output", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"create", "secret", "--output", "json"}, &stdout, &stderr)
 
 	if code != 4 {
 		t.Fatalf("exit code = %d, want 4", code)
@@ -211,7 +211,7 @@ func TestRunWithContextReleaseEventsFollowCancellationUsesJSONErrorContract(t *t
 	var stdout, stderr bytes.Buffer
 	codeCh := make(chan int, 1)
 	go func() {
-		codeCh <- runWithContext(parent, []string{"release", "events", "release-follow", "--follow", "--output", "json"}, &stdout, &stderr)
+		codeCh <- runWithContext(parent, []string{"get", "release-events", "release-follow", "--follow", "--output", "json"}, &stdout, &stderr)
 	}()
 
 	select {

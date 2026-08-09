@@ -47,7 +47,7 @@ func TestStackfileSchemaAcceptsOutputFlagWhenRegisteredUnderRoot(t *testing.T) {
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"stackfile", "schema", "-o", "json"})
+	root.SetArgs([]string{"get", "stackfile-schema", "-o", "json"})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("root stackfile schema: %v", err)
@@ -65,7 +65,7 @@ func TestStackfileSchemaOutputFileWritesExactEmbeddedBytes(t *testing.T) {
 	var stdout bytes.Buffer
 	root.SetOut(&stdout)
 	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"stackfile", "schema", "--output-file", outputPath})
+	root.SetArgs([]string{"get", "stackfile-schema", "--output-file", outputPath})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("root stackfile schema --output-file: %v", err)
@@ -419,7 +419,7 @@ func TestStackfileExportRootErrorNamesUnsupportedConstruct(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"stackfile", "export", "app"}, &stdout, &stderr)
+	code := runWithWriters([]string{"export", "stackfile", "app"}, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want failure")
@@ -477,7 +477,7 @@ func TestStackfileExportRootErrorDoesNotLeakEnvironmentValues(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"stackfile", "export", "app", "-o", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"export", "stackfile", "app", "-o", "json"}, &stdout, &stderr)
 
 	if code == 0 {
 		t.Fatal("exit code = 0, want failure")

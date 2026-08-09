@@ -13,7 +13,7 @@ import (
 func TestConfigSetContextJSONPrintsResult(t *testing.T) {
 	t.Setenv("STACKDOME_CONFIG", filepath.Join(t.TempDir(), "config.json"))
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"config", "set-context", "https://example.stackdome.test", "-o", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"use", "context", "https://example.stackdome.test", "-o", "json"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr: %s", code, stderr.String())
 	}
@@ -43,7 +43,7 @@ func TestConfigSetStackRejectsEphemeralEnvTokenContext(t *testing.T) {
 	t.Setenv("STACKDOME_PROJECT", "default")
 
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"config", "set-stack", "app", "-o", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"use", "stack", "app", "-o", "json"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("set-stack succeeded even though an env-token process cannot persist the selection")
 	}
@@ -64,7 +64,7 @@ func TestConfigSetContextRejectsEnvironmentOverrides(t *testing.T) {
 	t.Setenv("STACKDOME_TOKEN", "sdm_ephemeral")
 
 	var stdout, stderr bytes.Buffer
-	code := runWithWriters([]string{"config", "set-context", "https://new.example", "-o", "json"}, &stdout, &stderr)
+	code := runWithWriters([]string{"use", "context", "https://new.example", "-o", "json"}, &stdout, &stderr)
 	if code == 0 {
 		t.Fatal("set-context succeeded even though environment overrides would keep the old context active")
 	}

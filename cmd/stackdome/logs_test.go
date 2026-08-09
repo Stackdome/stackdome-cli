@@ -149,6 +149,34 @@ func TestLogsTableWritesRawData(t *testing.T) {
 	}
 }
 
+func TestLogsResourceFlagSelectsRuntimeResourceNamedBuild(t *testing.T) {
+	const stackID = "b02262ac-8e6e-45cd-b18e-acb5d3f97ce4"
+	var requestedPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: end\ndata: {}\n\n"))
+	}))
+	defer ts.Close()
+
+	ctx := cmdutil.NewCommandContext(&config.Config{
+		ServerURL: ts.URL, AccessToken: "sdm_test", OrganizationID: "org-1",
+		ProjectName: "proj-1", CurrentStack: stackID,
+	}, output.FormatJSON, slog.LevelError)
+	cmd := newLogsCmd()
+	cmd.SetContext(context.Background())
+	cmdutil.SetContext(cmd, ctx)
+	cmd.SetArgs([]string{"--resource", "build"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("logs --resource build: %v", err)
+	}
+	want := "/api/v1/organizations/org-1/projects/proj-1/stacks/" + stackID + "/resources/build/logs"
+	if requestedPath != want {
+		t.Errorf("request path = %q, want %q", requestedPath, want)
+	}
+}
+
 // A server-side SSE error must reach the root error boundary without first
 // leaking a prose line that would make JSON stderr undecodable.
 func TestLogsJSONServerErrorIsSingleRootDocument(t *testing.T) {
