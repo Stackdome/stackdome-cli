@@ -85,6 +85,20 @@ func (c *Client) ListOrgProjects(ctx context.Context, orgID string) ([]serverapi
 	return resp.Items, nil
 }
 
+func selectProjectName(projects []serverapi.Project) (string, bool) {
+	for _, p := range projects {
+		if p.Name != "" && p.DefaultProject != nil && *p.DefaultProject {
+			return p.Name, true
+		}
+	}
+	for _, p := range projects {
+		if p.Name != "" {
+			return p.Name, true
+		}
+	}
+	return "", false
+}
+
 // ResolveDefaultProject picks the project the CLI operates in. Projects are not
 // exposed in the CLI UX, so we resolve one silently: the default project if the
 // API marks one, otherwise the first.
@@ -94,23 +108,20 @@ func (c *Client) ResolveDefaultProject(ctx context.Context, orgID string) (strin
 		return "", err
 	}
 
-	// Server bug: GET /users/current/projects answers {"items":[],"total":0} on
-	// deployed servers even when the user has a default project, which made
-	// login fail outright. GET /organizations/{org_id}/projects is correct.
-	// Drop this fallback once the per-user endpoint is fixed.
-	if len(projects) == 0 && orgID != "" {
+	if name, ok := selectProjectName(projects); ok {
+		return name, nil
+	}
+
+	// GET /users/current/projects has returned empty and malformed project lists
+	// on deployed servers. GET /organizations/{org_id}/projects is the fallback.
+	if orgID != "" {
 		if projects, err = c.ListOrgProjects(ctx, orgID); err != nil {
 			return "", err
 		}
-	}
-
-	for _, p := range projects {
-		if p.DefaultProject != nil && *p.DefaultProject {
-			return p.Name, nil
+		if name, ok := selectProjectName(projects); ok {
+			return name, nil
 		}
 	}
-	if len(projects) > 0 {
-		return projects[0].Name, nil
-	}
+
 	return "", clierrors.New("No projects found for your account.")
 }
