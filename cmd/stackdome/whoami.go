@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
+	"github.com/Stackdome/stackdome-cli/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,18 @@ type whoamiInfo struct {
 	Stack       string `json:"current_stack,omitempty"`
 }
 
+func authDetails(cfg *config.Config) (method, source string) {
+	method = "session (jwt)"
+	if strings.HasPrefix(cfg.AccessToken, "sdm_") {
+		method = "api token"
+	}
+	source = "config file"
+	if cfg.TokenFromEnv() {
+		source = "STACKDOME_TOKEN"
+	}
+	return method, source
+}
+
 func newWhoamiCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
@@ -29,14 +42,7 @@ func newWhoamiCmd() *cobra.Command {
 				return err
 			}
 
-			authMethod := "session (jwt)"
-			if strings.HasPrefix(ctx.Config.AccessToken, "sdm_") {
-				authMethod = "api token"
-			}
-			tokenSource := "config file"
-			if ctx.Config.TokenFromEnv() {
-				tokenSource = "STACKDOME_TOKEN"
-			}
+			authMethod, tokenSource := authDetails(ctx.Config)
 
 			info := whoamiInfo{
 				User:        userDisplayName(user),

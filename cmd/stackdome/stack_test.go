@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/Stackdome/stackdome-cli/internal/cmdutil"
 	"github.com/Stackdome/stackdome-cli/internal/config"
 	"github.com/Stackdome/stackdome-cli/internal/output"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStackUseSelectsExistingStackAndPersistsFullID(t *testing.T) {
@@ -334,5 +336,99 @@ func TestStackDeleteJSONPrintsStructuredResult(t *testing.T) {
 	}
 	if got.Status != "deletion_initiated" || got.Resource != "stack" || got.Name != "app" || got.ID != "stack-1" {
 		t.Errorf("result = %#v, want deletion_initiated stack app stack-1", got)
+	}
+}
+
+func TestStackListTableMarksCurrentStackForBothAliases(t *testing.T) {
+	for _, args := range [][]string{{"get", "stacks"}, {"list", "stacks"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			stdout := executeStackList(t, output.FormatTable, "stack-2", args...)
+			if !strings.Contains(stdout, "CURRENT") {
+				t.Fatalf("table omitted CURRENT header:\n%s", stdout)
+			}
+			assertCurrentStackRow(t, stdout)
+		})
+	}
+}
+
+func TestStackListTableRecognizesLegacySelectedStackName(t *testing.T) {
+	stdout := executeStackList(t, output.FormatTable, "two", "get", "stacks")
+	assertCurrentStackRow(t, stdout)
+}
+
+func TestStackListStructuredOutputMarksCurrentStack(t *testing.T) {
+	for _, format := range []output.Format{output.FormatJSON, output.FormatYAML} {
+		for _, args := range [][]string{{"get", "stacks"}, {"list", "stacks"}} {
+			t.Run(string(format)+"_"+strings.Join(args, "_"), func(t *testing.T) {
+				stdout := executeStackList(t, format, "stack-2", args...)
+				var items []map[string]any
+				decodeStructuredTestOutput(t, format, stdout, &items)
+				if len(items) != 2 {
+					t.Fatalf("stack count = %d, want 2: %#v", len(items), items)
+				}
+				if items[0]["current"] != false || items[1]["current"] != true {
+					t.Fatalf("current flags = %#v, want false then true", items)
+				}
+				if items[1]["id"] != "stack-2" || items[1]["name"] != "two" || items[1]["latest_release"] == nil {
+					t.Fatalf("existing stack fields were not preserved: %#v", items[1])
+				}
+			})
+		}
+	}
+}
+
+func assertCurrentStackRow(t *testing.T, table string) {
+	t.Helper()
+	for _, line := range strings.Split(table, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "two" {
+			want := []string{"*", "two", "stack-2", "Released"}
+			if strings.Join(fields, "|") != strings.Join(want, "|") {
+				t.Fatalf("selected row fields = %v, want %v\n%s", fields, want, table)
+			}
+			return
+		}
+	}
+	t.Fatalf("selected stack row not found:\n%s", table)
+}
+
+func executeStackList(t *testing.T, format output.Format, current string, args ...string) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/organizations/org-1/projects/default/stacks" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"id":"stack-1","name":"one","spec":{},"latest_release":{"state":"Released"}},{"id":"stack-2","name":"two","spec":{},"latest_release":{"state":"Released"}}],"total":2}`))
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	body := fmt.Sprintf(`{"server_url":%q,"access_token":"sdm_test","organization_id":"org-1","project_name":"default","current_stack":%q}`, server.URL, current)
+	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STACKDOME_CONFIG", configPath)
+
+	var stdout, stderr bytes.Buffer
+	argv := append(append([]string{}, args...), "-o", string(format))
+	if code := runWithWriters(argv, &stdout, &stderr); code != 0 {
+		t.Fatalf("%v exit=%d stderr=%s", argv, code, stderr.String())
+	}
+	return stdout.String()
+}
+
+func decodeStructuredTestOutput(t *testing.T, format output.Format, raw string, target any) {
+	t.Helper()
+	var err error
+	if format == output.FormatYAML {
+		err = yaml.Unmarshal([]byte(raw), target)
+	} else {
+		err = json.Unmarshal([]byte(raw), target)
+	}
+	if err != nil {
+		t.Fatalf("decode %s output: %v\n%s", format, err, raw)
 	}
 }

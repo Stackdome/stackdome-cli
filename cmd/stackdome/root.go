@@ -78,6 +78,7 @@ Exit codes:
 	rootCmd.AddCommand(documentCommand(newLogoutCmd(), operationDocs("logout", "Clear stored credentials", "Remove credentials stored for the active Stackdome context. Environment-supplied credentials are not modified.", "stackdome logout")))
 	rootCmd.AddCommand(documentCommand(newSignupCmd(), operationDocs("signup", "Create a new Stackdome account", "Create an account and organization, authenticate the new session, and persist its credentials.", "stackdome signup --url https://api.stackdome.example --name 'Ada Lovelace' --email ada@example.com --org example")))
 	rootCmd.AddCommand(documentCommand(newWhoamiCmd(), operationDocs("whoami", "Show the active identity and scope", "Show the authenticated user, organization, project, server, and authentication method without revealing credentials.", "stackdome whoami -o json")))
+	rootCmd.AddCommand(newCtxCmd())
 	rootCmd.AddCommand(newDeployCmd())
 	rootCmd.AddCommand(newApplyCmd())
 	rootCmd.AddCommand(documentCommand(newStatusCmd(), operationDocs("status [resource]", "Show stack and resource status", "Show live status for the selected or specified stack, optionally filtered to one runtime resource. Pass --watch to refresh continuously.", "stackdome status --watch\n  stackdome status web --stack demo")))
