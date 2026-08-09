@@ -7,6 +7,7 @@ release_base_url=${STACKDOME_RELEASE_BASE_URL:-https://github.com/${repository}/
 api_base_url=${STACKDOME_API_BASE_URL:-https://api.github.com}
 version=${STACKDOME_VERSION:-}
 install_dir=${STACKDOME_INSTALL_DIR:-}
+modify_path=true
 tmp_dir=
 staged_binary=
 
@@ -19,6 +20,7 @@ Install the Stackdome CLI on macOS or Linux.
 Options:
   --version <version>        Install a specific release (for example, v0.0.2-alpha)
   --install-dir <directory>  Install stackdome into this directory
+  --no-modify-path           Do not persist the install directory in PATH
   -h, --help                 Show this help
 
 Environment:
@@ -54,6 +56,90 @@ download() {
   fi
 }
 
+path_contains() {
+  target_path=$1
+  old_ifs=$IFS
+  IFS=:
+  glob_was_disabled=false
+  case $- in
+    *f*) glob_was_disabled=true ;;
+    *) set -f ;;
+  esac
+
+  path_found=false
+  for path_entry in ${PATH:-}; do
+    if [ "$path_entry" = "$target_path" ]; then
+      path_found=true
+      break
+    fi
+  done
+
+  [ "$glob_was_disabled" = true ] || set +f
+  IFS=$old_ifs
+  [ "$path_found" = true ]
+}
+
+quote_for_shell() {
+  printf '%s' "$1" | sed "s/'/'\"'\"'/g"
+}
+
+append_line_once() {
+  destination=$1
+  line=$2
+
+  if [ -f "$destination" ] && grep -Fqx "$line" "$destination"; then
+    return 0
+  fi
+  printf '\n# Added by the Stackdome CLI installer\n%s\n' "$line" >>"$destination"
+}
+
+persist_path() {
+  if [ -n "${GITHUB_PATH:-}" ]; then
+    if ! grep -Fqx "$install_dir" "$GITHUB_PATH" 2>/dev/null; then
+      printf '%s\n' "$install_dir" >>"$GITHUB_PATH" || return 1
+    fi
+    path_config_file=$GITHUB_PATH
+    return 0
+  fi
+
+  [ -n "${HOME:-}" ] || return 1
+  [ "$install_dir" = "$HOME/.local/bin" ] || return 1
+
+  shell_path=${SHELL:-}
+  shell_name=${shell_path##*/}
+  case "$shell_name" in
+    zsh)
+      profile_dir=${ZDOTDIR:-$HOME}
+      profile=$profile_dir/.zshrc
+      ;;
+    bash)
+      profile_dir=$HOME
+      if [ "$os" = darwin ]; then
+        if [ -f "$HOME/.bash_profile" ]; then
+          profile=$HOME/.bash_profile
+        elif [ -f "$HOME/.bash_login" ]; then
+          profile=$HOME/.bash_login
+        elif [ -f "$HOME/.profile" ]; then
+          profile=$HOME/.profile
+        else
+          profile=$HOME/.bash_profile
+        fi
+      else
+        profile=$HOME/.bashrc
+      fi
+      ;;
+    sh | dash | ksh)
+      profile_dir=$HOME
+      profile=$HOME/.profile
+      ;;
+    *) return 1 ;;
+  esac
+
+  mkdir -p "$profile_dir" || return 1
+  append_line_once "$profile" 'export PATH="$HOME/.local/bin:$PATH"' || return 1
+  path_config_file=$profile
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version)
@@ -65,6 +151,10 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--install-dir requires a value"
       install_dir=$2
       shift 2
+      ;;
+    --no-modify-path)
+      modify_path=false
+      shift
       ;;
     -h | --help)
       usage
@@ -93,8 +183,12 @@ esac
 
 if [ -n "$install_dir" ]; then
   :
-elif [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+elif path_contains /usr/local/bin && [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
   install_dir=/usr/local/bin
+elif [ -n "${HOME:-}" ] && path_contains "$HOME/.local/bin"; then
+  install_dir=$HOME/.local/bin
+elif [ -n "${HOME:-}" ] && path_contains "$HOME/bin" && [ -d "$HOME/bin" ] && [ -w "$HOME/bin" ]; then
+  install_dir=$HOME/bin
 else
   [ -n "${HOME:-}" ] || fail "HOME is not set; set STACKDOME_INSTALL_DIR"
   install_dir=$HOME/.local/bin
@@ -148,7 +242,16 @@ mv -f "$staged_binary" "$install_dir/stackdome" || fail "could not install stack
 staged_binary=
 
 printf 'Installed Stackdome CLI %s to %s/stackdome\n' "$version" "$install_dir"
-case ":${PATH:-}:" in
-  *":$install_dir:"*) ;;
-  *) printf 'warning: %s is not on your PATH; add it before running stackdome\n' "$install_dir" >&2 ;;
-esac
+if ! path_contains "$install_dir"; then
+  path_config_file=
+  if [ "$modify_path" = true ] && persist_path; then
+    printf 'Configured %s in PATH via %s.\n' "$install_dir" "$path_config_file" >&2
+  elif [ "$modify_path" = true ]; then
+    printf 'warning: %s is not on your PATH; add it before running stackdome\n' "$install_dir" >&2
+  else
+    printf 'PATH modification skipped by --no-modify-path.\n' >&2
+  fi
+  printf 'Run this command to use stackdome in the current shell:\n' >&2
+  quoted_install_dir=$(quote_for_shell "$install_dir")
+  printf '  export PATH='"'"'%s'"'"':"$PATH"\n' "$quoted_install_dir" >&2
+fi

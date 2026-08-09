@@ -20,7 +20,10 @@ sh "$installer_file"
 ```
 
 The installer supports Intel/AMD64 and ARM64. It writes to `/usr/local/bin`
-when that directory is writable, otherwise it uses `$HOME/.local/bin`.
+when that directory is writable and already on `PATH`, otherwise it uses
+`$HOME/.local/bin`. When necessary, it adds that directory to the appropriate
+zsh, bash, or POSIX shell profile and prints the command needed for the current
+shell. In GitHub Actions, it updates `$GITHUB_PATH` instead.
 
 To install a specific version or directory:
 
@@ -35,3 +38,9 @@ sh "$installer_file" \
 
 `STACKDOME_VERSION` and `STACKDOME_INSTALL_DIR` provide the same settings for
 automation. Explicit flags take precedence over environment variables.
+
+Agents and CI systems that manage `PATH` themselves can disable profile changes:
+
+```sh
+sh "$installer_file" --no-modify-path
+```
