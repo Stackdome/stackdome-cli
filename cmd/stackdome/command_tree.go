@@ -213,7 +213,7 @@ func configureRootHelpGroups(root *cobra.Command) {
 		"create": "change", "update": "change", "delete": "change",
 		"apply": "deploy", "deploy": "deploy", "cancel": "deploy", "rollback": "deploy",
 		"status": "observe", "logs": "observe", "restart": "observe", "open": "observe", "backup": "observe",
-		"login": "auth", "logout": "auth", "signup": "auth", "whoami": "auth", "use": "auth",
+		"ctx": "auth", "login": "auth", "logout": "auth", "signup": "auth", "whoami": "auth", "use": "auth",
 		"init": "tooling", "validate": "tooling", "export": "tooling", "doctor": "tooling",
 		"api": "tooling", "completion": "tooling", "version": "tooling",
 	}

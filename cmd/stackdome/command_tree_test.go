@@ -141,6 +141,23 @@ func TestRootCommandsAreGroupedByPurpose(t *testing.T) {
 	}
 }
 
+func TestCtxIsRegisteredInAuthenticationGroup(t *testing.T) {
+	root := newRootCmd()
+	cmd, _, err := root.Find([]string{"ctx"})
+	if err != nil || cmd == root || !cmd.Runnable() {
+		t.Fatalf("ctx did not resolve to a runnable command: cmd=%v err=%v", cmd, err)
+	}
+	if cmd.GroupID != "auth" {
+		t.Fatalf("ctx group = %q, want auth", cmd.GroupID)
+	}
+	text := cmd.Use + "\n" + cmd.Short + "\n" + cmd.Long + "\n" + cmd.Example
+	for _, want := range []string{"ctx", "server", "stack", "stackdome ctx -o json"} {
+		if !strings.Contains(strings.ToLower(text), strings.ToLower(want)) {
+			t.Fatalf("ctx help omitted %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestSafetyCriticalHelpDocumentsSideEffects(t *testing.T) {
 	root := newRootCmd()
 	tests := []struct {
@@ -175,6 +192,7 @@ func TestLifecycleCommandsRejectUnexpectedPositionalArguments(t *testing.T) {
 		{"apply", "unexpected"},
 		{"deploy", "unexpected"},
 		{"create", "release", "unexpected"},
+		{"ctx", "unexpected"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := runWithWriters(args, &stdout, &stderr); code != 4 {
