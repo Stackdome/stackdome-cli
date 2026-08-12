@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,7 +13,6 @@ import (
 	clierrors "github.com/Stackdome/stackdome-cli/internal/errors"
 	serverapi "github.com/Stackdome/stackdome/pkg/api/openapi"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 type authenticationResult struct {
@@ -30,45 +28,28 @@ type authenticationResult struct {
 func newLoginCmd() *cobra.Command {
 	var (
 		flagURL      string
-		flagEmail    string
-		flagPassword string
 		flagToken    string
 		flagInsecure bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Authenticate with a Stackdome server",
+		Short: "Authenticate with a Stackdome API token",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if flagURL == "" {
-				return clierrors.ValidationError("--url is required")
-			}
-			serverURL, err := normalizeLoginServerURL(flagURL, flagInsecure)
+			ctx := cmdutil.GetContext(cmd)
+			setup, insecure, err := resolveAuthSetup(flagURL, flagInsecure, ctx.Config)
 			if err != nil {
 				return err
 			}
-
-			// Refuse to block on a prompt nobody can answer.
-			if flagToken == "" && (flagEmail == "" || flagPassword == "") && !term.IsTerminal(int(os.Stdin.Fd())) {
-				return clierrors.ValidationError("non-interactive login requires --token, or both --email and --password")
+			if flagToken == "" {
+				return clierrors.ValidationError(setup.loginGuidance())
 			}
-
-			cfg, err := config.Load()
-			if err != nil {
-				return err
-			}
-
-			if flagToken != "" {
-				return loginWithToken(cmd, cfg, serverURL, flagToken, flagInsecure)
-			}
-			return loginWithCredentials(cmd, cfg, serverURL, flagEmail, flagPassword, flagInsecure)
+			return loginWithToken(cmd, ctx.Config, setup.ServerURL, flagToken, insecure)
 		},
 	}
 
-	cmd.Flags().StringVar(&flagURL, "url", "", "Stackdome server URL (required)")
-	cmd.Flags().StringVar(&flagEmail, "email", "", "Email address")
-	cmd.Flags().StringVar(&flagPassword, "password", "", "Password")
-	cmd.Flags().StringVar(&flagToken, "token", "", "API token (skips email/password)")
+	cmd.Flags().StringVar(&flagURL, "url", "", "Stackdome server URL (defaults to the selected instance)")
+	cmd.Flags().StringVar(&flagToken, "token", "", "Full access API token")
 	cmd.Flags().BoolVar(&flagInsecure, "insecure", false, "Allow HTTP or skip HTTPS certificate verification")
 
 	return cmd
@@ -163,35 +144,6 @@ func persistLogin(cmd *cobra.Command, c *client.Client, cfg *config.Config) erro
 	return cfg.Save()
 }
 
-func loginWithCredentials(cmd *cobra.Command, cfg *config.Config, serverURL, email, password string, insecure bool) error {
-	if email == "" {
-		email = promptInput("Email: ")
-	}
-	if password == "" {
-		password = promptPassword("Password: ")
-	}
-
-	c := client.New(serverURL, client.WithInsecure(insecure))
-
-	result, err := c.Login(cmd.Context(), email, password)
-	if err != nil {
-		return err
-	}
-
-	cfg.ServerURL = serverURL
-	cfg.AccessToken = result.AccessToken
-	cfg.RefreshToken = result.RefreshToken
-	cfg.OrganizationID = result.User.GetOrganisationId()
-	cfg.Username = userDisplayName(result.User)
-	cfg.Insecure = insecure
-
-	if err := persistLogin(cmd, c, cfg); err != nil {
-		return err
-	}
-
-	return printAuthenticationResult(cmd, cfg, false, "session")
-}
-
 func printAuthenticationResult(cmd *cobra.Command, cfg *config.Config, accountCreated bool, authMethod string) error {
 	ctx := cmdutil.GetContext(cmd)
 	if !ctx.Formatter.IsTable() {
@@ -224,21 +176,4 @@ func userDisplayName(u *serverapi.User) string {
 		return name
 	}
 	return u.GetEmail()
-}
-
-func promptInput(prompt string) string {
-	fmt.Fprint(os.Stderr, prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Scan()
-	return strings.TrimSpace(scanner.Text())
-}
-
-func promptPassword(prompt string) string {
-	fmt.Fprint(os.Stderr, prompt)
-	b, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Fprintln(os.Stderr)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
