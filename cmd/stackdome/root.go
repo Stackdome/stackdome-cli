@@ -74,9 +74,9 @@ Exit codes:
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o", "table", "Output format (table, json, yaml)")
 
 	rootCmd.AddCommand(documentCommand(newVersionCmd(), operationDocs("version", "Print the CLI version", "Print build version, commit, date, and Go runtime metadata. Structured output is available with -o json or yaml.", "stackdome version -o json")))
-	rootCmd.AddCommand(documentCommand(newLoginCmd(), operationDocs("login", "Authenticate with a Stackdome server", "Authenticate with an API token or email and password, then persist the resulting credentials unless environment variables control the session.", "stackdome login --url https://api.stackdome.example --token <token>")))
+	rootCmd.AddCommand(documentCommand(newLoginCmd(), operationDocs("login", "Authenticate with a Stackdome API token", "Authenticate with a Full access API token, then persist the resulting credentials unless environment variables control the session. Without --token, print the instance-specific browser setup steps.", "stackdome login --url https://api.stackdome.example --token <token>")))
 	rootCmd.AddCommand(documentCommand(newLogoutCmd(), operationDocs("logout", "Clear stored credentials", "Remove credentials stored for the active Stackdome context. Environment-supplied credentials are not modified.", "stackdome logout")))
-	rootCmd.AddCommand(documentCommand(newSignupCmd(), operationDocs("signup", "Create a new Stackdome account", "Create an account and organization, authenticate the new session, and persist its credentials.", "stackdome signup --url https://api.stackdome.example --name 'Ada Lovelace' --email ada@example.com --org example")))
+	rootCmd.AddCommand(documentCommand(newSignupCmd(), operationDocs("signup", "Show web signup and CLI setup instructions", "Print the instance-specific web signup and Full access API-token setup steps required before CLI login.", "stackdome signup --url https://api.stackdome.example")))
 	rootCmd.AddCommand(documentCommand(newWhoamiCmd(), operationDocs("whoami", "Show the active identity and scope", "Show the authenticated user, organization, project, server, and authentication method without revealing credentials.", "stackdome whoami -o json")))
 	rootCmd.AddCommand(newCtxCmd())
 	rootCmd.AddCommand(newDeployCmd())
